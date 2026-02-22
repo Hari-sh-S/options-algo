@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+
+# Build output
+frontend/out/
+frontend/.next/
+
+# Environment
+.env
+backend/.env
+
+# Data files
+backend/master_instruments.csv
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Firebase
+.firebase/

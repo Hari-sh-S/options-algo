@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.git/
+.gitignore
+*.md
+.vscode/
+.idea/
+master_instruments.csv
