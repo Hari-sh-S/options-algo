@@ -44,11 +44,14 @@ async def get_expiries(index: IndexName):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.get("/spot", response_model=SpotPriceResponse)
-async def get_spot(index: IndexName, client_id: str, access_token: str):
-    """Fetch the real-time spot (LTP) for an index."""
+@router.post("/spot", response_model=SpotPriceResponse)
+async def get_spot(req: Credentials, index: IndexName):
+    """Fetch the real-time spot (LTP) for an index.
+
+    Changed from GET to POST to keep credentials out of URL.
+    """
     try:
-        ltp = dhan_service.get_spot_price(client_id, access_token, index)
+        ltp = dhan_service.get_spot_price(req.client_id, req.access_token, index)
         return SpotPriceResponse(
             index=index.value,
             ltp=ltp,

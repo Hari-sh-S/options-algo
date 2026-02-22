@@ -40,6 +40,7 @@ class ExecuteRequest(Credentials):
     expiry: str = Field(..., description="Expiry date string, e.g. '2026-02-20'")
     lots: int = Field(ge=1, description="Number of lots")
     sl_percent: float = Field(ge=0, description="Stop-loss percentage (e.g. 30 means 30%)")
+    mode: str = Field("live", description="Trading mode: 'live' or 'paper'")
 
     # Strategy-specific optional fields
     target_premium: Optional[float] = Field(
@@ -84,6 +85,7 @@ class ExecuteResponse(BaseModel):
     strategy: str
     index: str
     expiry: str
+    mode: str = "live"
     legs: list[OrderLeg] = []
     sl_legs: list[OrderLeg] = []
     error: Optional[str] = None

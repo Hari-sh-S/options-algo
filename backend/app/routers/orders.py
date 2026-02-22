@@ -1,5 +1,7 @@
 """
 Order execution routes — execute strategies, view positions, square off.
+
+SECURITY: Credentials are sent in POST body only (never in URL query params).
 """
 
 from __future__ import annotations
@@ -21,13 +23,14 @@ from ..models import (
 )
 from ..strategy_engine import execute_strategy
 from .. import dhan_service
+from .. import paper_service
 
 router = APIRouter(prefix="/api/orders", tags=["Orders"])
 
 
 @router.post("/execute", response_model=ExecuteResponse)
 async def execute_order(req: ExecuteRequest):
-    """Execute a strategy immediately."""
+    """Execute a strategy immediately (live or paper)."""
     try:
         result = execute_strategy(
             client_id=req.client_id,
@@ -39,6 +42,7 @@ async def execute_order(req: ExecuteRequest):
             sl_percent=req.sl_percent,
             target_premium=req.target_premium,
             spot_percent=req.spot_percent,
+            mode=req.mode,
         )
 
         # Map result legs to OrderLeg schema (defensively coerce types)
@@ -71,6 +75,7 @@ async def execute_order(req: ExecuteRequest):
             strategy=result.get("strategy", req.strategy.value),
             index=result.get("index", req.index.value),
             expiry=result.get("expiry", req.expiry),
+            mode=result.get("mode", req.mode),
             legs=legs,
             sl_legs=sl_legs,
             error=result.get("error"),
@@ -81,22 +86,31 @@ async def execute_order(req: ExecuteRequest):
             strategy=req.strategy.value,
             index=req.index.value,
             expiry=req.expiry,
+            mode=req.mode,
             legs=[],
             sl_legs=[],
             error=str(exc),
         )
 
 
-@router.get("/positions", response_model=PositionsResponse)
-async def get_positions(client_id: str, access_token: str):
-    """Fetch all open positions with P&L."""
+@router.post("/positions", response_model=PositionsResponse)
+async def get_positions(req: Credentials):
+    """Fetch all open positions with P&L.
+
+    Changed from GET to POST to keep credentials out of URL query params.
+    """
     try:
-        raw_positions = dhan_service.get_positions(client_id, access_token)
+        # Check for paper positions first
+        paper_pos = paper_service.get_positions()
+        raw_positions = dhan_service.get_positions(req.client_id, req.access_token) if req.client_id else []
+
+        # Combine real + paper positions
+        all_positions = list(raw_positions) + list(paper_pos)
 
         positions: list[PositionItem] = []
         total_pnl = 0.0
 
-        for pos in raw_positions:
+        for pos in all_positions:
             net_qty = pos.get("netQty") or (pos.get("buyQty", 0) - pos.get("sellQty", 0))
             if net_qty == 0:
                 continue
@@ -130,10 +144,21 @@ async def get_positions(client_id: str, access_token: str):
 @router.post("/square-off", response_model=GenericResponse)
 async def square_off(req: SquareOffRequest):
     """Square off all open positions and cancel pending orders."""
-    result = dhan_service.square_off_all(req.client_id, req.access_token)
-    if result.get("success"):
-        return GenericResponse(
-            success=True,
-            message=f"Squared off {result.get('squared_off', 0)} position(s)",
-        )
-    raise HTTPException(status_code=500, detail=result.get("error", "Square-off failed"))
+    # Square off paper positions
+    paper_result = paper_service.square_off_all()
+    paper_count = paper_result.get("squared_off", 0)
+
+    # Square off live positions
+    live_count = 0
+    if req.client_id and req.access_token:
+        result = dhan_service.square_off_all(req.client_id, req.access_token)
+        if result.get("success"):
+            live_count = result.get("squared_off", 0)
+        elif not paper_count:
+            raise HTTPException(status_code=500, detail=result.get("error", "Square-off failed"))
+
+    total = paper_count + live_count
+    return GenericResponse(
+        success=True,
+        message=f"Squared off {total} position(s) ({paper_count} paper, {live_count} live)",
+    )

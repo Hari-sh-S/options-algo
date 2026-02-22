@@ -46,12 +46,11 @@ export async function fetchSpot(
     index: string,
     creds: Credentials
 ): Promise<SpotPrice> {
-    const params = new URLSearchParams({
-        index,
-        client_id: creds.client_id,
-        access_token: creds.access_token,
+    const res = await fetch(`${API_BASE}/api/market/spot?index=${index}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(creds),
     });
-    const res = await fetch(`${API_BASE}/api/market/spot?${params}`);
     if (!res.ok) throw new Error("Failed to fetch spot price");
     return res.json();
 }
@@ -102,6 +101,7 @@ export interface ExecutePayload extends Credentials {
     expiry: string;
     lots: number;
     sl_percent: number;
+    mode: string;
     target_premium?: number | null;
     spot_percent?: number | null;
 }
@@ -139,11 +139,11 @@ export interface PositionsResponse {
 }
 
 export async function fetchPositions(creds: Credentials): Promise<PositionsResponse> {
-    const params = new URLSearchParams({
-        client_id: creds.client_id,
-        access_token: creds.access_token,
+    const res = await fetch(`${API_BASE}/api/orders/positions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(creds),
     });
-    const res = await fetch(`${API_BASE}/api/orders/positions?${params}`);
     if (!res.ok) throw new Error("Failed to fetch positions");
     return res.json();
 }

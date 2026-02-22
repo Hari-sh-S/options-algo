@@ -4,7 +4,7 @@ Strategy engine — computes strikes and executes the three option-selling strat
 Each strategy function:
   1. Reads live market data
   2. Determines the correct strikes
-  3. Places SELL orders for both legs
+  3. Places SELL orders for both legs (live or paper)
   4. Returns structured results for the stop-loss manager
 """
 
@@ -21,6 +21,7 @@ from .config import (
     StrategyType,
 )
 from . import dhan_service
+from . import paper_service
 
 logger = logging.getLogger(__name__)
 
@@ -39,30 +40,34 @@ def execute_strategy(
     sl_percent: float,
     target_premium: float | None = None,
     spot_percent: float | None = None,
+    mode: str = "live",
 ) -> dict[str, Any]:
     """
     Dispatch to the appropriate strategy, execute orders, then hand off to
     the stop-loss manager.
+
+    mode: "live" (real Dhan orders) or "paper" (simulated)
     """
     quantity = lots * LOT_SIZES[index]
     exchange_segment = EXCHANGE_SEGMENTS[index]
+    is_paper = mode == "paper"
 
     logger.info(
-        "Executing %s | index=%s expiry=%s lots=%d qty=%d sl=%.1f%%",
-        strategy, index, expiry, lots, quantity, sl_percent,
+        "Executing %s [%s] | index=%s expiry=%s lots=%d qty=%d sl=%.1f%%",
+        strategy, mode.upper(), index, expiry, lots, quantity, sl_percent,
     )
 
     try:
         if strategy == StrategyType.SHORT_STRADDLE:
-            result = _short_straddle(client_id, access_token, index, expiry, quantity, exchange_segment)
+            result = _short_straddle(client_id, access_token, index, expiry, quantity, exchange_segment, is_paper)
         elif strategy == StrategyType.PREMIUM_BASED:
             if target_premium is None:
                 return _error("target_premium is required for Premium Based strategy")
-            result = _premium_based(client_id, access_token, index, expiry, quantity, exchange_segment, target_premium)
+            result = _premium_based(client_id, access_token, index, expiry, quantity, exchange_segment, target_premium, is_paper)
         elif strategy == StrategyType.SPOT_STRANGLE:
             if spot_percent is None:
                 return _error("spot_percent is required for Spot Based Strangle strategy")
-            result = _spot_strangle(client_id, access_token, index, expiry, quantity, exchange_segment, spot_percent)
+            result = _spot_strangle(client_id, access_token, index, expiry, quantity, exchange_segment, spot_percent, is_paper)
         else:
             return _error(f"Unknown strategy: {strategy}")
 
@@ -71,19 +76,40 @@ def execute_strategy(
         result["index"] = index.value
         result["expiry"] = expiry
         result["quantity"] = quantity
+        result["mode"] = mode
 
         # Place stop-loss orders if entry legs were successful
         if result.get("success") and sl_percent > 0:
-            from .stoploss_manager import place_stop_losses
-            sl_result = place_stop_losses(
-                client_id=client_id,
-                access_token=access_token,
-                entry_legs=result.get("legs", []),
-                sl_percent=sl_percent,
-                quantity=quantity,
-                exchange_segment=exchange_segment,
-            )
-            result["sl_legs"] = sl_result
+            if is_paper:
+                # Paper SL orders
+                sl_result = []
+                for leg in result.get("legs", []):
+                    premium = leg.get("premium", 0) or 0
+                    trigger = round(premium * (1 + sl_percent / 100), 2)
+                    sl_resp = paper_service.place_sl_buy_order(
+                        security_id=leg.get("security_id", ""),
+                        exchange_segment=exchange_segment,
+                        quantity=quantity,
+                        trigger_price=trigger,
+                        tag=f"sl_{leg.get('leg', '').lower()}",
+                    )
+                    parsed = dhan_service._parse_order_response(sl_resp)
+                    parsed["leg"] = f"SL-{leg.get('leg', '?')}"
+                    parsed["strike"] = leg.get("strike", 0)
+                    parsed["trigger_price"] = trigger
+                    sl_result.append(parsed)
+                result["sl_legs"] = sl_result
+            else:
+                from .stoploss_manager import place_stop_losses
+                sl_result = place_stop_losses(
+                    client_id=client_id,
+                    access_token=access_token,
+                    entry_legs=result.get("legs", []),
+                    sl_percent=sl_percent,
+                    quantity=quantity,
+                    exchange_segment=exchange_segment,
+                )
+                result["sl_legs"] = sl_result
 
         return result
 
@@ -103,6 +129,7 @@ def _short_straddle(
     expiry: str,
     quantity: int,
     exchange_segment: str,
+    is_paper: bool = False,
 ) -> dict[str, Any]:
     """
     Short Straddle: Sell ATM CE + ATM PE at the same strike.
@@ -119,9 +146,14 @@ def _short_straddle(
     legs = []
 
     # Sell CE
-    ce_resp = dhan_service.place_sell_order(
-        client_id, access_token, ce_sec_id, exchange_segment, quantity, tag="straddle_ce"
-    )
+    if is_paper:
+        ce_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
+            security_id=ce_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="straddle_ce", symbol=ce_sym,
+        ))
+    else:
+        ce_resp = dhan_service.place_sell_order(
+            client_id, access_token, ce_sec_id, exchange_segment, quantity, tag="straddle_ce"
+        )
     legs.append({
         "leg": "CE",
         "strike": atm_strike,
@@ -133,9 +165,14 @@ def _short_straddle(
     })
 
     # Sell PE
-    pe_resp = dhan_service.place_sell_order(
-        client_id, access_token, pe_sec_id, exchange_segment, quantity, tag="straddle_pe"
-    )
+    if is_paper:
+        pe_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
+            security_id=pe_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="straddle_pe", symbol=pe_sym,
+        ))
+    else:
+        pe_resp = dhan_service.place_sell_order(
+            client_id, access_token, pe_sec_id, exchange_segment, quantity, tag="straddle_pe"
+        )
     legs.append({
         "leg": "PE",
         "strike": atm_strike,
@@ -158,6 +195,7 @@ def _premium_based(
     quantity: int,
     exchange_segment: str,
     target_premium: float,
+    is_paper: bool = False,
 ) -> dict[str, Any]:
     """
     Premium Based: Scan the option chain and pick CE & PE whose LTP is
@@ -180,9 +218,15 @@ def _premium_based(
     legs = []
 
     # Sell CE
-    ce_resp = dhan_service.place_sell_order(
-        client_id, access_token, best_ce["ce_security_id"], exchange_segment, quantity, tag="premium_ce"
-    )
+    if is_paper:
+        ce_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
+            security_id=best_ce["ce_security_id"], exchange_segment=exchange_segment, quantity=quantity,
+            tag="premium_ce", symbol=best_ce.get("ce_symbol", ""), premium=best_ce["ce_ltp"],
+        ))
+    else:
+        ce_resp = dhan_service.place_sell_order(
+            client_id, access_token, best_ce["ce_security_id"], exchange_segment, quantity, tag="premium_ce"
+        )
     legs.append({
         "leg": "CE",
         "strike": best_ce["strike"],
@@ -195,9 +239,15 @@ def _premium_based(
     })
 
     # Sell PE
-    pe_resp = dhan_service.place_sell_order(
-        client_id, access_token, best_pe["pe_security_id"], exchange_segment, quantity, tag="premium_pe"
-    )
+    if is_paper:
+        pe_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
+            security_id=best_pe["pe_security_id"], exchange_segment=exchange_segment, quantity=quantity,
+            tag="premium_pe", symbol=best_pe.get("pe_symbol", ""), premium=best_pe["pe_ltp"],
+        ))
+    else:
+        pe_resp = dhan_service.place_sell_order(
+            client_id, access_token, best_pe["pe_security_id"], exchange_segment, quantity, tag="premium_pe"
+        )
     legs.append({
         "leg": "PE",
         "strike": best_pe["strike"],
@@ -221,6 +271,7 @@ def _spot_strangle(
     quantity: int,
     exchange_segment: str,
     spot_percent: float,
+    is_paper: bool = False,
 ) -> dict[str, Any]:
     """
     Spot Based Strangle: Select OTM strikes at ±X% from spot, then sell both.
@@ -251,9 +302,14 @@ def _spot_strangle(
     legs = []
 
     # Sell OTM CE
-    ce_resp = dhan_service.place_sell_order(
-        client_id, access_token, ce_sec_id, exchange_segment, quantity, tag="strangle_ce"
-    )
+    if is_paper:
+        ce_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
+            security_id=ce_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="strangle_ce", symbol=ce_sym,
+        ))
+    else:
+        ce_resp = dhan_service.place_sell_order(
+            client_id, access_token, ce_sec_id, exchange_segment, quantity, tag="strangle_ce"
+        )
     legs.append({
         "leg": "CE",
         "strike": ce_strike,
@@ -265,9 +321,14 @@ def _spot_strangle(
     })
 
     # Sell OTM PE
-    pe_resp = dhan_service.place_sell_order(
-        client_id, access_token, pe_sec_id, exchange_segment, quantity, tag="strangle_pe"
-    )
+    if is_paper:
+        pe_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
+            security_id=pe_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="strangle_pe", symbol=pe_sym,
+        ))
+    else:
+        pe_resp = dhan_service.place_sell_order(
+            client_id, access_token, pe_sec_id, exchange_segment, quantity, tag="strangle_pe"
+        )
     legs.append({
         "leg": "PE",
         "strike": pe_strike,

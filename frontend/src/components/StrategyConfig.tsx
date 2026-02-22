@@ -24,10 +24,11 @@ const INDICES = [
 
 interface StrategyConfigProps {
     creds: Credentials;
+    mode: "paper" | "live";
     onExecuted: (result: ExecuteResponse) => void;
 }
 
-export default function StrategyConfig({ creds, onExecuted }: StrategyConfigProps) {
+export default function StrategyConfig({ creds, mode, onExecuted }: StrategyConfigProps) {
     const [strategy, setStrategy] = useState<StrategyValue>(STRATEGIES[0].value);
     const [index, setIndex] = useState<"NIFTY" | "SENSEX">("NIFTY");
     const [expiries, setExpiries] = useState<string[]>([]);
@@ -78,6 +79,7 @@ export default function StrategyConfig({ creds, onExecuted }: StrategyConfigProp
                 expiry,
                 lots,
                 sl_percent: slPercent,
+                mode,
                 target_premium: strategy === "premium_based" ? targetPremium : null,
                 spot_percent: strategy === "spot_strangle" ? spotPercent : null,
             };
@@ -110,6 +112,7 @@ export default function StrategyConfig({ creds, onExecuted }: StrategyConfigProp
                 expiry,
                 lots,
                 sl_percent: slPercent,
+                mode,
                 target_premium: strategy === "premium_based" ? targetPremium : null,
                 spot_percent: strategy === "spot_strangle" ? spotPercent : null,
                 execute_at: scheduleTime,
@@ -282,7 +285,7 @@ export default function StrategyConfig({ creds, onExecuted }: StrategyConfigProp
                     disabled={loading}
                     className="flex-1 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:scale-[1.02] transition-all disabled:opacity-50 disabled:hover:scale-100"
                 >
-                    {loading ? "Executing…" : "⚡ Execute Now"}
+                    {loading ? "Executing…" : mode === "paper" ? "📄 Paper Execute" : "⚡ Execute Now"}
                 </button>
                 <button
                     onClick={() => setShowScheduler(!showScheduler)}
