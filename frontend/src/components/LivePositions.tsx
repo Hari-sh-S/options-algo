@@ -1,7 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { squareOffAll, type PositionsResponse } from "@/lib/api";
+import { useState, useEffect } from "react";
+import {
+    squareOffAll,
+    setAutoSquareoff,
+    getAutoSquareoff,
+    cancelAutoSquareoff,
+    type PositionsResponse,
+} from "@/lib/api";
 
 interface LivePositionsProps {
     idToken: string | null;
@@ -11,6 +17,21 @@ interface LivePositionsProps {
 
 export default function LivePositions({ idToken, data, onRefresh }: LivePositionsProps) {
     const [squaringOff, setSquaringOff] = useState(false);
+    const [autoTime, setAutoTime] = useState("15:15");
+    const [autoActive, setAutoActive] = useState(false);
+    const [autoAt, setAutoAt] = useState<string | null>(null);
+    const [settingAuto, setSettingAuto] = useState(false);
+
+    // Load auto square-off status on mount
+    useEffect(() => {
+        if (!idToken) return;
+        getAutoSquareoff(idToken)
+            .then((status) => {
+                setAutoActive(status.active);
+                if (status.squareoff_at) setAutoAt(status.squareoff_at);
+            })
+            .catch(() => { });
+    }, [idToken]);
 
     const handleSquareOff = async () => {
         if (!idToken) return;
@@ -23,6 +44,31 @@ export default function LivePositions({ idToken, data, onRefresh }: LivePosition
             /* ignore */
         } finally {
             setSquaringOff(false);
+        }
+    };
+
+    const handleSetAuto = async () => {
+        if (!idToken) return;
+        setSettingAuto(true);
+        try {
+            const result = await setAutoSquareoff(autoTime + ":00", idToken);
+            setAutoActive(true);
+            setAutoAt(result.squareoff_at);
+        } catch {
+            /* ignore */
+        } finally {
+            setSettingAuto(false);
+        }
+    };
+
+    const handleCancelAuto = async () => {
+        if (!idToken) return;
+        try {
+            await cancelAutoSquareoff(idToken);
+            setAutoActive(false);
+            setAutoAt(null);
+        } catch {
+            /* ignore */
         }
     };
 
@@ -101,6 +147,48 @@ export default function LivePositions({ idToken, data, onRefresh }: LivePosition
                     </div>
                 </>
             )}
+
+            {/* Auto Square-Off */}
+            <div className="mt-4 pt-4 border-t border-white/5">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <svg className="w-3.5 h-3.5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span className="text-xs text-slate-400">Auto Square-Off</span>
+                    </div>
+
+                    {autoActive ? (
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs text-amber-400">
+                                ⏰ {autoAt ? new Date(autoAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : autoTime}
+                            </span>
+                            <button
+                                onClick={handleCancelAuto}
+                                className="text-[10px] text-red-400 hover:text-red-300 underline"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="time"
+                                value={autoTime}
+                                onChange={(e) => setAutoTime(e.target.value)}
+                                className="rounded bg-slate-800/60 border border-white/10 px-2 py-1 text-xs text-white w-24 [color-scheme:dark]"
+                            />
+                            <button
+                                onClick={handleSetAuto}
+                                disabled={settingAuto}
+                                className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 text-[11px] font-semibold text-amber-400 hover:bg-amber-500/20 transition-all disabled:opacity-50"
+                            >
+                                {settingAuto ? "…" : "Set"}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }

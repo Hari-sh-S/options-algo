@@ -1,5 +1,6 @@
 """
 Scheduler routes — add, list, and cancel scheduled execution jobs.
+Auto square-off scheduling and P&L history retrieval.
 
 Uses Firebase auth to identify the user, stores UID in the job
 so credentials can be resolved from Firestore at execution time.
@@ -10,6 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Header
+from pydantic import BaseModel, Field
 
 from ..models import (
     ScheduleRequest,
@@ -17,7 +19,10 @@ from ..models import (
     JobsListResponse,
     GenericResponse,
 )
-from ..scheduler import add_scheduled_job, list_jobs, cancel_job
+from ..scheduler import (
+    add_scheduled_job, list_jobs, cancel_job,
+    schedule_auto_squareoff, cancel_auto_squareoff, get_auto_squareoff_status,
+)
 
 
 router = APIRouter(prefix="/api/scheduler", tags=["Scheduler"])
@@ -74,3 +79,86 @@ async def cancel_scheduled_job(job_id: str):
     if cancel_job(job_id):
         return GenericResponse(success=True, message=f"Job {job_id} cancelled")
     raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+
+# ---------------------------------------------------------------------------
+# Auto Square-Off
+# ---------------------------------------------------------------------------
+
+class AutoSquareoffRequest(BaseModel):
+    squareoff_time: str = Field(..., description="Time to square off, e.g. '15:15:00'")
+
+
+@router.post("/auto-squareoff")
+async def set_auto_squareoff(
+    req: AutoSquareoffRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Schedule automatic square-off at a specific time."""
+    uid = _get_uid(authorization)
+    result = schedule_auto_squareoff(uid, req.squareoff_time)
+    return {"success": True, **result}
+
+
+@router.get("/auto-squareoff")
+async def get_auto_squareoff(authorization: Optional[str] = Header(None)):
+    """Get current auto square-off status."""
+    uid = _get_uid(authorization)
+    status = get_auto_squareoff_status(uid)
+    return {"active": bool(status), **(status or {})}
+
+
+@router.delete("/auto-squareoff")
+async def delete_auto_squareoff(authorization: Optional[str] = Header(None)):
+    """Cancel the auto square-off."""
+    uid = _get_uid(authorization)
+    cancelled = cancel_auto_squareoff(uid)
+    return GenericResponse(
+        success=cancelled,
+        message="Auto square-off cancelled" if cancelled else "No auto square-off was scheduled",
+    )
+
+
+# ---------------------------------------------------------------------------
+# P&L History
+# ---------------------------------------------------------------------------
+
+@router.get("/paper-history")
+async def get_paper_history(authorization: Optional[str] = Header(None)):
+    """Get paper trading P&L history for the last 30 days."""
+    uid = _get_uid(authorization)
+
+    from ..firebase_auth import _db as db
+
+    try:
+        docs = (
+            db.collection("paper_history")
+            .document(uid)
+            .collection("days")
+            .order_by("date", direction="DESCENDING")
+            .limit(30)
+            .stream()
+        )
+        days = [doc.to_dict() for doc in docs]
+    except Exception:
+        days = []
+
+    # Compute aggregate stats
+    total_pnl = sum(d.get("total_pnl", 0) for d in days)
+    total_trades = sum(d.get("num_trades", 0) for d in days)
+    winning_days = len([d for d in days if d.get("total_pnl", 0) > 0])
+    losing_days = len([d for d in days if d.get("total_pnl", 0) < 0])
+
+    return {
+        "days": days,
+        "stats": {
+            "total_pnl": round(total_pnl, 2),
+            "total_trades": total_trades,
+            "total_days": len(days),
+            "winning_days": winning_days,
+            "losing_days": losing_days,
+            "win_rate": round(winning_days / max(len(days), 1) * 100, 1),
+            "best_day": max((d.get("total_pnl", 0) for d in days), default=0),
+            "worst_day": min((d.get("total_pnl", 0) for d in days), default=0),
+        },
+    }

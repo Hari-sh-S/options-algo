@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="0" fill="#0a0a14"/>
+  <g transform="translate(256,256)">
+    <!-- Upward trend line (teal) -->
+    <line x1="-120" y1="80" x2="40" y2="-100" stroke="#2dd4bf" stroke-width="28" stroke-linecap="round"/>
+    <line x1="40" y1="-100" x2="120" y2="-40" stroke="#2dd4bf" stroke-width="28" stroke-linecap="round"/>
+    <!-- Downward trend line (violet) -->
+    <line x1="-120" y1="-60" x2="20" y2="80" stroke="#8b5cf6" stroke-width="28" stroke-linecap="round"/>
+    <line x1="20" y1="80" x2="120" y2="40" stroke="#8b5cf6" stroke-width="28" stroke-linecap="round"/>
+    <!-- Center dot -->
+    <circle cx="-10" cy="10" r="16" fill="white" opacity="0.9"/>
+  </g>
+</svg>

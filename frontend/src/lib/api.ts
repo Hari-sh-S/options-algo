@@ -320,3 +320,80 @@ export async function cancelJob(jobId: string): Promise<{ success: boolean; mess
     if (!res.ok) throw new Error("Failed to cancel job");
     return res.json();
 }
+
+// ── Auto Square-Off ──────────────────────────────────────────────────────
+
+export async function setAutoSquareoff(
+    squareoffTime: string,
+    idToken: string
+): Promise<{ success: boolean; squareoff_at: string }> {
+    const res = await fetch(`${API_BASE}/api/scheduler/auto-squareoff`, {
+        method: "POST",
+        headers: authHeaders(idToken),
+        body: JSON.stringify({ squareoff_time: squareoffTime }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(extractError(err, "Failed to set auto square-off"));
+    }
+    return res.json();
+}
+
+export async function getAutoSquareoff(
+    idToken: string
+): Promise<{ active: boolean; squareoff_at?: string }> {
+    const res = await fetch(`${API_BASE}/api/scheduler/auto-squareoff`, {
+        headers: authHeaders(idToken),
+    });
+    if (!res.ok) throw new Error("Failed to get auto square-off status");
+    return res.json();
+}
+
+export async function cancelAutoSquareoff(
+    idToken: string
+): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/api/scheduler/auto-squareoff`, {
+        method: "DELETE",
+        headers: authHeaders(idToken),
+    });
+    if (!res.ok) throw new Error("Failed to cancel auto square-off");
+    return res.json();
+}
+
+// ── P&L History ──────────────────────────────────────────────────────────
+
+export interface DaySummary {
+    date: string;
+    total_pnl: number;
+    num_trades: number;
+    winning_trades: number;
+    losing_trades: number;
+    best_trade: number;
+    worst_trade: number;
+}
+
+export interface PnlHistoryStats {
+    total_pnl: number;
+    total_trades: number;
+    total_days: number;
+    winning_days: number;
+    losing_days: number;
+    win_rate: number;
+    best_day: number;
+    worst_day: number;
+}
+
+export interface PnlHistoryResponse {
+    days: DaySummary[];
+    stats: PnlHistoryStats;
+}
+
+export async function fetchPnlHistory(
+    idToken: string
+): Promise<PnlHistoryResponse> {
+    const res = await fetch(`${API_BASE}/api/scheduler/paper-history`, {
+        headers: authHeaders(idToken),
+    });
+    if (!res.ok) throw new Error("Failed to fetch P&L history");
+    return res.json();
+}

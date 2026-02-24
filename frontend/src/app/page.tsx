@@ -8,6 +8,7 @@ import StrategyConfig from "@/components/StrategyConfig";
 import InfoCards from "@/components/InfoCards";
 import OrderHistory from "@/components/EntrySummary";
 import LivePositions from "@/components/LivePositions";
+import PnlDashboard from "@/components/PnlDashboard";
 import HelpTab from "@/components/HelpTab";
 import ProfileTab from "@/components/ProfileTab";
 import ScheduledJobs from "@/components/ScheduledJobs";
@@ -68,13 +69,14 @@ export default function Dashboard() {
                 />
                 <ScheduledJobs idToken={idToken} />
               </div>
-              {/* Right Column — Live Positions first, Order History below */}
+              {/* Right Column */}
               <div className="lg:col-span-5 space-y-6">
                 <LivePositions
                   idToken={idToken}
                   data={positionsData}
                   onRefresh={refreshPositions}
                 />
+                <PnlDashboard idToken={idToken} />
                 <OrderHistory results={orderHistory} />
               </div>
             </div>
