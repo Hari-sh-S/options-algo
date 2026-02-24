@@ -95,7 +95,7 @@ export function usePositions(idToken: string | null) {
 
     useEffect(() => {
         refresh();
-        const id = setInterval(refresh, 15000);
+        const id = setInterval(refresh, 1000);
         return () => clearInterval(id);
     }, [refresh, idToken]);
 
