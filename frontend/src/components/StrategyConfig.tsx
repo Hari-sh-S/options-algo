@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
     fetchExpiries,
     executeOrder,
     scheduleJob,
-    type Credentials,
     type ExecuteResponse,
 } from "@/lib/api";
 
@@ -23,13 +22,13 @@ const INDICES = [
 ] as const;
 
 interface StrategyConfigProps {
-    creds: Credentials;
+    idToken: string | null;
     mode: "paper" | "live";
     onModeChange: (mode: "paper" | "live") => void;
     onExecuted: (result: ExecuteResponse) => void;
 }
 
-export default function StrategyConfig({ creds, mode, onModeChange, onExecuted }: StrategyConfigProps) {
+export default function StrategyConfig({ idToken, mode, onModeChange, onExecuted }: StrategyConfigProps) {
     const [strategy, setStrategy] = useState<StrategyValue>(STRATEGIES[0].value);
     const [index, setIndex] = useState<"NIFTY" | "SENSEX">("NIFTY");
     const [expiries, setExpiries] = useState<string[]>([]);
@@ -62,8 +61,8 @@ export default function StrategyConfig({ creds, mode, onModeChange, onExecuted }
     };
 
     const handleExecute = async () => {
-        if (!creds.client_id || !creds.access_token) {
-            setError("Enter Dhan credentials first.");
+        if (!idToken) {
+            setError("Sign in & save API credentials first.");
             return;
         }
         if (!expiry) {
@@ -74,7 +73,6 @@ export default function StrategyConfig({ creds, mode, onModeChange, onExecuted }
         setError(null);
         try {
             const payload = {
-                ...creds,
                 strategy,
                 index,
                 expiry,
@@ -84,19 +82,23 @@ export default function StrategyConfig({ creds, mode, onModeChange, onExecuted }
                 target_premium: strategy === "premium_based" ? targetPremium : null,
                 spot_percent: strategy === "spot_strangle" ? spotPercent : null,
             };
-            const res = await executeOrder(payload);
+            const res = await executeOrder(payload, idToken);
             onExecuted(res);
-            if (res.error) setError(res.error);
+            if (res.error) {
+                const errMsg = typeof res.error === 'string' ? res.error : JSON.stringify(res.error);
+                setError(errMsg);
+            }
         } catch (e: any) {
-            setError(e.message);
+            const msg = typeof e?.message === 'string' ? e.message : JSON.stringify(e?.message ?? e);
+            setError(msg);
         } finally {
             setLoading(false);
         }
     };
 
     const handleSchedule = async () => {
-        if (!creds.client_id || !creds.access_token) {
-            setError("Enter Dhan credentials first.");
+        if (!idToken) {
+            setError("Sign in & save API credentials first.");
             return;
         }
         if (!expiry) {
@@ -107,7 +109,6 @@ export default function StrategyConfig({ creds, mode, onModeChange, onExecuted }
         setError(null);
         try {
             await scheduleJob({
-                ...creds,
                 strategy,
                 index,
                 expiry,
@@ -117,11 +118,12 @@ export default function StrategyConfig({ creds, mode, onModeChange, onExecuted }
                 target_premium: strategy === "premium_based" ? targetPremium : null,
                 spot_percent: strategy === "spot_strangle" ? spotPercent : null,
                 execute_at: scheduleTime,
-            });
+            }, idToken);
             setShowScheduler(false);
             setError(null);
         } catch (e: any) {
-            setError(e.message);
+            const msg = typeof e?.message === 'string' ? e.message : JSON.stringify(e?.message ?? e);
+            setError(msg);
         } finally {
             setLoading(false);
         }

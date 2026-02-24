@@ -1,14 +1,17 @@
 """
 Order execution routes — execute strategies, view positions, square off.
 
-SECURITY: Credentials are sent in POST body only (never in URL query params).
+SECURITY: Credentials are read from Firestore via Firebase ID token.
+Fallback: if Authorization header is absent, credentials from POST body are used
+(for backward compatibility / local development).
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 
 from ..config import IST, LOT_SIZES
 from ..models import (
@@ -28,13 +31,45 @@ from .. import paper_service
 router = APIRouter(prefix="/api/orders", tags=["Orders"])
 
 
+def _resolve_credentials(
+    body_creds: Credentials | None,
+    authorization: str | None,
+) -> tuple[str, str]:
+    """Resolve Dhan credentials from Firebase token (preferred) or request body (fallback)."""
+    if authorization and authorization.startswith("Bearer "):
+        from ..firebase_auth import verify_id_token, get_user_credentials
+
+        token = authorization[len("Bearer "):]
+        try:
+            decoded = verify_id_token(token)
+            uid = decoded["uid"]
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+        creds = get_user_credentials(uid)
+        if not creds or not creds.get("client_id"):
+            raise HTTPException(
+                status_code=400,
+                detail="No API credentials saved. Go to API Credentials tab to save them.",
+            )
+        return creds["client_id"], creds["access_token"]
+
+    # Fallback: credentials from request body
+    if body_creds and body_creds.client_id and body_creds.access_token:
+        return body_creds.client_id, body_creds.access_token
+
+    raise HTTPException(status_code=401, detail="Authentication required")
+
+
 @router.post("/execute", response_model=ExecuteResponse)
-async def execute_order(req: ExecuteRequest):
+async def execute_order(req: ExecuteRequest, authorization: Optional[str] = Header(None)):
     """Execute a strategy immediately (live or paper)."""
     try:
+        client_id, access_token = _resolve_credentials(req, authorization)
+
         result = execute_strategy(
-            client_id=req.client_id,
-            access_token=req.access_token,
+            client_id=client_id,
+            access_token=access_token,
             strategy=req.strategy,
             index=req.index,
             expiry=req.expiry,
@@ -45,7 +80,6 @@ async def execute_order(req: ExecuteRequest):
             mode=req.mode,
         )
 
-        # Map result legs to OrderLeg schema (defensively coerce types)
         legs = [
             OrderLeg(
                 leg=str(l.get("leg", "?")),
@@ -80,6 +114,8 @@ async def execute_order(req: ExecuteRequest):
             sl_legs=sl_legs,
             error=result.get("error"),
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         return ExecuteResponse(
             success=False,
@@ -94,17 +130,17 @@ async def execute_order(req: ExecuteRequest):
 
 
 @router.post("/positions", response_model=PositionsResponse)
-async def get_positions(req: Credentials):
-    """Fetch all open positions with P&L.
-
-    Changed from GET to POST to keep credentials out of URL query params.
-    """
+async def get_positions(
+    req: Credentials | None = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Fetch all open positions with P&L."""
     try:
-        # Check for paper positions first
-        paper_pos = paper_service.get_positions()
-        raw_positions = dhan_service.get_positions(req.client_id, req.access_token) if req.client_id else []
+        client_id, access_token = _resolve_credentials(req, authorization)
 
-        # Combine real + paper positions
+        paper_pos = paper_service.get_positions()
+        raw_positions = dhan_service.get_positions(client_id, access_token) if client_id else []
+
         all_positions = list(raw_positions) + list(paper_pos)
 
         positions: list[PositionItem] = []
@@ -137,21 +173,28 @@ async def get_positions(req: Credentials):
             positions=positions,
             total_pnl=round(total_pnl, 2),
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/square-off", response_model=GenericResponse)
-async def square_off(req: SquareOffRequest):
+async def square_off(
+    req: SquareOffRequest | None = None,
+    authorization: Optional[str] = Header(None),
+):
     """Square off all open positions and cancel pending orders."""
+    client_id, access_token = _resolve_credentials(req, authorization)
+
     # Square off paper positions
     paper_result = paper_service.square_off_all()
     paper_count = paper_result.get("squared_off", 0)
 
     # Square off live positions
     live_count = 0
-    if req.client_id and req.access_token:
-        result = dhan_service.square_off_all(req.client_id, req.access_token)
+    if client_id and access_token:
+        result = dhan_service.square_off_all(client_id, access_token)
         if result.get("success"):
             live_count = result.get("squared_off", 0)
         elif not paper_count:

@@ -2,7 +2,6 @@
 
 import React from "react";
 import { useMarketStatus, useClock, useSpotPrices } from "@/hooks/useMarketData";
-import type { Credentials } from "@/lib/api";
 
 export type TabName = "dashboard" | "features" | "credentials" | "profile" | "help";
 
@@ -55,15 +54,15 @@ const TABS: { value: TabName; label: string; icon: React.ReactNode }[] = [
 ];
 
 interface HeaderProps {
-    creds: Credentials | null;
+    idToken: string | null;
     activeTab: TabName;
     onTabChange: (tab: TabName) => void;
 }
 
-export default function Header({ creds, activeTab, onTabChange }: HeaderProps) {
+export default function Header({ idToken, activeTab, onTabChange }: HeaderProps) {
     const status = useMarketStatus();
     const clock = useClock();
-    const { nifty, sensex } = useSpotPrices(creds);
+    const { nifty, sensex } = useSpotPrices(idToken);
 
     return (
         <header className="w-full border-b border-white/10 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 backdrop-blur-xl">
@@ -109,8 +108,8 @@ export default function Header({ creds, activeTab, onTabChange }: HeaderProps) {
                             key={tab.value}
                             onClick={() => onTabChange(tab.value)}
                             className={`flex items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-xs font-medium rounded-t-lg transition-all duration-200 ${activeTab === tab.value
-                                ? "bg-white/10 text-white border-b-2 border-violet-500 shadow-[0_2px_10px_rgba(139,92,246,0.15)]"
-                                : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+                                    ? "bg-white/10 text-white border-b-2 border-violet-500 shadow-[0_2px_10px_rgba(139,92,246,0.15)]"
+                                    : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
                                 }`}
                         >
                             {tab.icon}

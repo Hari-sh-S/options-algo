@@ -8,11 +8,10 @@ import {
     type MarketStatus,
     type SpotPrice,
     type PositionsResponse,
-    type Credentials,
 } from "@/lib/api";
 
 /**
- * Poll market status every 10 seconds (no Dhan API call — lightweight).
+ * Poll market status every 10 seconds (no auth needed).
  */
 export function useMarketStatus() {
     const [data, setData] = useState<MarketStatus | null>(null);
@@ -34,40 +33,34 @@ export function useMarketStatus() {
 }
 
 /**
- * Poll spot prices for BOTH indices in a single hook with staggered requests.
- * Uses a 15-second interval to stay well within Dhan's rate limits.
- * Each index is fetched sequentially with a 2-second gap between them.
+ * Poll spot prices for BOTH indices. Uses Firebase ID token for auth.
  */
-export function useSpotPrices(creds: Credentials | null) {
+export function useSpotPrices(idToken: string | null) {
     const [nifty, setNifty] = useState<SpotPrice | null>(null);
     const [sensex, setSensex] = useState<SpotPrice | null>(null);
-    const credsRef = useRef(creds);
-    credsRef.current = creds;
+    const tokenRef = useRef(idToken);
+    tokenRef.current = idToken;
 
     useEffect(() => {
-        if (!credsRef.current?.client_id) return;
+        if (!tokenRef.current) return;
         let active = true;
 
         const poll = async () => {
-            if (!credsRef.current?.client_id) return;
+            if (!tokenRef.current) return;
 
-            // Fetch NIFTY
             try {
-                const res = await fetchSpot("NIFTY", credsRef.current);
+                const res = await fetchSpot("NIFTY", tokenRef.current);
                 if (active) setNifty(res);
             } catch {
                 /* ignore */
             }
 
-            // Stagger: wait 2s before SENSEX to avoid rate limiting
             await new Promise((r) => setTimeout(r, 2000));
-
             if (!active) return;
 
-            // Fetch SENSEX
             try {
-                if (!credsRef.current?.client_id) return;
-                const res = await fetchSpot("SENSEX", credsRef.current);
+                if (!tokenRef.current) return;
+                const res = await fetchSpot("SENSEX", tokenRef.current);
                 if (active) setSensex(res);
             } catch {
                 /* ignore */
@@ -75,25 +68,25 @@ export function useSpotPrices(creds: Credentials | null) {
         };
 
         poll();
-        const id = setInterval(poll, 15000); // Every 15 seconds
+        const id = setInterval(poll, 15000);
         return () => { active = false; clearInterval(id); };
-    }, [creds?.client_id]);
+    }, [idToken]);
 
     return { nifty, sensex };
 }
 
 /**
- * Poll open positions every 15 seconds.
+ * Poll open positions every 15 seconds. Uses Firebase ID token for auth.
  */
-export function usePositions(creds: Credentials | null) {
+export function usePositions(idToken: string | null) {
     const [data, setData] = useState<PositionsResponse | null>(null);
-    const credsRef = useRef(creds);
-    credsRef.current = creds;
+    const tokenRef = useRef(idToken);
+    tokenRef.current = idToken;
 
     const refresh = useCallback(async () => {
-        if (!credsRef.current?.client_id) return;
+        if (!tokenRef.current) return;
         try {
-            const res = await fetchPositions(credsRef.current);
+            const res = await fetchPositions(tokenRef.current);
             setData(res);
         } catch {
             /* ignore */
@@ -104,7 +97,7 @@ export function usePositions(creds: Credentials | null) {
         refresh();
         const id = setInterval(refresh, 15000);
         return () => clearInterval(id);
-    }, [refresh, creds?.client_id]);
+    }, [refresh, idToken]);
 
     return { data, refresh };
 }

@@ -1,22 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { squareOffAll, type Credentials, type PositionsResponse } from "@/lib/api";
+import { squareOffAll, type PositionsResponse } from "@/lib/api";
 
 interface LivePositionsProps {
-    creds: Credentials;
+    idToken: string | null;
     data: PositionsResponse | null;
     onRefresh: () => void;
 }
 
-export default function LivePositions({ creds, data, onRefresh }: LivePositionsProps) {
+export default function LivePositions({ idToken, data, onRefresh }: LivePositionsProps) {
     const [squaringOff, setSquaringOff] = useState(false);
 
     const handleSquareOff = async () => {
+        if (!idToken) return;
         if (!confirm("Square off ALL open positions? This action is irreversible.")) return;
         setSquaringOff(true);
         try {
-            await squareOffAll(creds);
+            await squareOffAll(idToken);
             onRefresh();
         } catch {
             /* ignore */
@@ -63,8 +64,8 @@ export default function LivePositions({ creds, data, onRefresh }: LivePositionsP
                                 <div className="flex items-center gap-3">
                                     <span
                                         className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${pos.option_type === "CE"
-                                                ? "bg-emerald-500/20 text-emerald-300"
-                                                : "bg-red-500/20 text-red-300"
+                                            ? "bg-emerald-500/20 text-emerald-300"
+                                            : "bg-red-500/20 text-red-300"
                                             }`}
                                     >
                                         {pos.option_type || "?"}
@@ -92,8 +93,8 @@ export default function LivePositions({ creds, data, onRefresh }: LivePositionsP
                     {/* Total P&L */}
                     <div
                         className={`rounded-lg p-3 text-center font-semibold ${totalPnl >= 0
-                                ? "bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20"
-                                : "bg-red-500/10 text-red-400 ring-1 ring-red-500/20"
+                            ? "bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20"
+                            : "bg-red-500/10 text-red-400 ring-1 ring-red-500/20"
                             }`}
                     >
                         Total P&L: {totalPnl >= 0 ? "+" : ""}₹{totalPnl.toFixed(2)}

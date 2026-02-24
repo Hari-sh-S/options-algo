@@ -4,6 +4,10 @@
  * In production (Firebase Hosting), API_BASE is empty because /api/* is
  * rewritten to Cloud Run on the same domain.  During local dev it falls
  * back to the local FastAPI server.
+ *
+ * SECURITY: All authenticated requests send the Firebase ID token in the
+ * Authorization header. Dhan credentials are never sent from the browser
+ * after initial save.
  */
 
 const API_BASE =
@@ -12,9 +16,111 @@ const API_BASE =
         ? ""
         : "http://127.0.0.1:8000");
 
-export interface Credentials {
+/** Build headers with optional Firebase auth token. */
+function authHeaders(idToken?: string | null): Record<string, string> {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (idToken) {
+        headers["Authorization"] = `Bearer ${idToken}`;
+    }
+    return headers;
+}
+
+/** Safely extract a human-readable error message from a FastAPI error response. */
+function extractError(err: any, fallback: string): string {
+    if (!err) return fallback;
+    if (typeof err.detail === "string") return err.detail;
+    if (Array.isArray(err.detail)) {
+        return err.detail
+            .map((d: any) => (typeof d === "string" ? d : d?.msg || JSON.stringify(d)))
+            .join("; ");
+    }
+    if (typeof err.detail === "object") return JSON.stringify(err.detail);
+    if (typeof err.message === "string") return err.message;
+    return fallback;
+}
+
+// ── Credentials ──────────────────────────────────────────────────────────
+
+export interface SaveCredentialsPayload {
     client_id: string;
-    access_token: string;
+    app_id: string;
+    app_secret: string;
+}
+
+export interface CredentialStatus {
+    has_credentials: boolean;
+    has_api_key: boolean;
+    has_access_token: boolean;
+    client_id_preview: string | null;
+}
+
+export async function saveCredentials(
+    payload: SaveCredentialsPayload,
+    idToken: string
+): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/api/credentials/save`, {
+        method: "POST",
+        headers: authHeaders(idToken),
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(extractError(err, "Failed to save credentials"));
+    }
+    return res.json();
+}
+
+export async function fetchCredentialStatus(
+    idToken: string
+): Promise<CredentialStatus> {
+    const res = await fetch(`${API_BASE}/api/credentials/status`, {
+        headers: authHeaders(idToken),
+    });
+    if (!res.ok) throw new Error("Failed to check credential status");
+    return res.json();
+}
+
+export async function deleteCredentials(
+    idToken: string
+): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/api/credentials/delete`, {
+        method: "DELETE",
+        headers: authHeaders(idToken),
+    });
+    if (!res.ok) throw new Error("Failed to delete credentials");
+    return res.json();
+}
+
+// ── Dhan OAuth ───────────────────────────────────────────────────────────
+
+export async function initiateDhanLogin(
+    idToken: string
+): Promise<{ login_url: string }> {
+    const res = await fetch(`${API_BASE}/api/auth/dhan/initiate`, {
+        method: "POST",
+        headers: authHeaders(idToken),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(extractError(err, "Failed to initiate Dhan login"));
+    }
+    return res.json();
+}
+
+export async function completeDhanCallback(
+    tokenId: string,
+    idToken: string
+): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/api/auth/dhan/callback`, {
+        method: "POST",
+        headers: authHeaders(idToken),
+        body: JSON.stringify({ token_id: tokenId }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(extractError(err, "Token exchange failed"));
+    }
+    return res.json();
 }
 
 // ── Market ────────────────────────────────────────────────────────────────
@@ -44,12 +150,12 @@ export async function fetchMarketStatus(): Promise<MarketStatus> {
 
 export async function fetchSpot(
     index: string,
-    creds: Credentials
+    idToken?: string | null
 ): Promise<SpotPrice> {
     const res = await fetch(`${API_BASE}/api/market/spot?index=${index}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(creds),
+        headers: authHeaders(idToken),
+        body: JSON.stringify({}),
     });
     if (!res.ok) throw new Error("Failed to fetch spot price");
     return res.json();
@@ -61,15 +167,17 @@ export async function fetchExpiries(index: string): Promise<ExpiriesResponse> {
     return res.json();
 }
 
-export async function updateData(creds: Credentials): Promise<{ success: boolean; message: string }> {
+export async function updateData(
+    idToken: string
+): Promise<{ success: boolean; message: string }> {
     const res = await fetch(`${API_BASE}/api/market/update-data`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(creds),
+        headers: authHeaders(idToken),
+        body: JSON.stringify({}),
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Failed to update data");
+        throw new Error(extractError(err, "Failed to update data"));
     }
     return res.json();
 }
@@ -95,7 +203,7 @@ export interface ExecuteResponse {
     error?: string | null;
 }
 
-export interface ExecutePayload extends Credentials {
+export interface ExecutePayload {
     strategy: string;
     index: string;
     expiry: string;
@@ -106,15 +214,18 @@ export interface ExecutePayload extends Credentials {
     spot_percent?: number | null;
 }
 
-export async function executeOrder(payload: ExecutePayload): Promise<ExecuteResponse> {
+export async function executeOrder(
+    payload: ExecutePayload,
+    idToken: string
+): Promise<ExecuteResponse> {
     const res = await fetch(`${API_BASE}/api/orders/execute`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(idToken),
         body: JSON.stringify(payload),
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Execution failed");
+        throw new Error(extractError(err, "Execution failed"));
     }
     return res.json();
 }
@@ -138,25 +249,29 @@ export interface PositionsResponse {
     error?: string | null;
 }
 
-export async function fetchPositions(creds: Credentials): Promise<PositionsResponse> {
+export async function fetchPositions(
+    idToken: string
+): Promise<PositionsResponse> {
     const res = await fetch(`${API_BASE}/api/orders/positions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(creds),
+        headers: authHeaders(idToken),
+        body: JSON.stringify({}),
     });
     if (!res.ok) throw new Error("Failed to fetch positions");
     return res.json();
 }
 
-export async function squareOffAll(creds: Credentials): Promise<{ success: boolean; message: string }> {
+export async function squareOffAll(
+    idToken: string
+): Promise<{ success: boolean; message: string }> {
     const res = await fetch(`${API_BASE}/api/orders/square-off`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(creds),
+        headers: authHeaders(idToken),
+        body: JSON.stringify({}),
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Square-off failed");
+        throw new Error(extractError(err, "Square-off failed"));
     }
     return res.json();
 }
@@ -176,15 +291,18 @@ export interface ScheduledJob {
     lots: number;
 }
 
-export async function scheduleJob(payload: SchedulePayload): Promise<ScheduledJob> {
+export async function scheduleJob(
+    payload: SchedulePayload,
+    idToken: string
+): Promise<ScheduledJob> {
     const res = await fetch(`${API_BASE}/api/scheduler/add`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(idToken),
         body: JSON.stringify(payload),
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Scheduling failed");
+        throw new Error(extractError(err, "Scheduling failed"));
     }
     return res.json();
 }

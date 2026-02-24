@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .scheduler import start_scheduler, shutdown_scheduler
 from .routers import market, orders
 from .routers import scheduler as scheduler_router
+from .routers import credentials as credentials_router
+from .routers import auth as auth_router
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -68,6 +70,8 @@ app.add_middleware(
 app.include_router(market.router)
 app.include_router(orders.router)
 app.include_router(scheduler_router.router)
+app.include_router(credentials_router.router)
+app.include_router(auth_router.router)
 
 
 # ---------------------------------------------------------------------------

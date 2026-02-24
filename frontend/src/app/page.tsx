@@ -11,20 +11,16 @@ import LivePositions from "@/components/LivePositions";
 import HelpTab from "@/components/HelpTab";
 import ProfileTab from "@/components/ProfileTab";
 import { usePositions } from "@/hooks/useMarketData";
+import { useAuth } from "@/contexts/AuthContext";
 
-import type { Credentials, ExecuteResponse } from "@/lib/api";
+import type { ExecuteResponse } from "@/lib/api";
 
 export default function Dashboard() {
-  const [creds, setCreds] = useState<Credentials>({
-    client_id: "",
-    access_token: "",
-  });
+  const { idToken } = useAuth();
   const [mode, setMode] = useState<"paper" | "live">("paper");
   const [activeTab, setActiveTab] = useState<TabName>("dashboard");
   const [lastResult, setLastResult] = useState<ExecuteResponse | null>(null);
-  const { data: positionsData, refresh: refreshPositions } = usePositions(
-    creds.client_id ? creds : null
-  );
+  const { data: positionsData, refresh: refreshPositions } = usePositions(idToken);
 
   const handleExecuted = useCallback(
     (result: ExecuteResponse) => {
@@ -44,7 +40,7 @@ export default function Dashboard() {
 
       <div className="relative z-10">
         <Header
-          creds={creds.client_id ? creds : null}
+          idToken={idToken}
           activeTab={activeTab}
           onTabChange={setActiveTab}
         />
@@ -64,7 +60,7 @@ export default function Dashboard() {
               {/* Left Column */}
               <div className="lg:col-span-7 space-y-6">
                 <StrategyConfig
-                  creds={creds}
+                  idToken={idToken}
                   mode={mode}
                   onModeChange={setMode}
                   onExecuted={handleExecuted}
@@ -74,7 +70,7 @@ export default function Dashboard() {
               <div className="lg:col-span-5 space-y-6">
                 <EntrySummary result={lastResult} />
                 <LivePositions
-                  creds={creds}
+                  idToken={idToken}
                   data={positionsData}
                   onRefresh={refreshPositions}
                 />
@@ -92,7 +88,7 @@ export default function Dashboard() {
           {/* ─── API Credentials Tab ─── */}
           {activeTab === "credentials" && (
             <div className="mx-auto max-w-lg">
-              <CredentialsPanel creds={creds} onChange={setCreds} />
+              <CredentialsPanel />
             </div>
           )}
 
