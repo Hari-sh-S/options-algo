@@ -143,12 +143,20 @@ def _short_straddle(
     # Find security IDs from master
     ce_sec_id, pe_sec_id, ce_sym, pe_sym = _find_option_pair(index, expiry, atm_strike)
 
+    # Fetch live LTP for paper positions
+    ce_ltp = 0.0
+    pe_ltp = 0.0
+    if is_paper:
+        seg = EXCHANGE_SEGMENTS[index]
+        ce_ltp = dhan_service._fetch_ltp(dhan_service._get_dhan(client_id, access_token), int(ce_sec_id), seg)
+        pe_ltp = dhan_service._fetch_ltp(dhan_service._get_dhan(client_id, access_token), int(pe_sec_id), seg)
+
     legs = []
 
     # Sell CE
     if is_paper:
         ce_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
-            security_id=ce_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="straddle_ce", symbol=ce_sym,
+            security_id=ce_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="straddle_ce", symbol=ce_sym, premium=ce_ltp,
         ))
     else:
         ce_resp = dhan_service.place_sell_order(
@@ -167,7 +175,7 @@ def _short_straddle(
     # Sell PE
     if is_paper:
         pe_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
-            security_id=pe_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="straddle_pe", symbol=pe_sym,
+            security_id=pe_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="straddle_pe", symbol=pe_sym, premium=pe_ltp,
         ))
     else:
         pe_resp = dhan_service.place_sell_order(
@@ -299,12 +307,20 @@ def _spot_strangle(
     ce_sec_id, _, ce_sym, _ = _find_option_pair(index, expiry, ce_strike)
     _, pe_sec_id, _, pe_sym = _find_option_pair(index, expiry, pe_strike)
 
+    # Fetch live LTP for paper positions
+    ce_ltp = 0.0
+    pe_ltp = 0.0
+    if is_paper:
+        seg = EXCHANGE_SEGMENTS[index]
+        ce_ltp = dhan_service._fetch_ltp(dhan_service._get_dhan(client_id, access_token), int(ce_sec_id), seg)
+        pe_ltp = dhan_service._fetch_ltp(dhan_service._get_dhan(client_id, access_token), int(pe_sec_id), seg)
+
     legs = []
 
     # Sell OTM CE
     if is_paper:
         ce_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
-            security_id=ce_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="strangle_ce", symbol=ce_sym,
+            security_id=ce_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="strangle_ce", symbol=ce_sym, premium=ce_ltp,
         ))
     else:
         ce_resp = dhan_service.place_sell_order(
@@ -323,7 +339,7 @@ def _spot_strangle(
     # Sell OTM PE
     if is_paper:
         pe_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
-            security_id=pe_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="strangle_pe", symbol=pe_sym,
+            security_id=pe_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="strangle_pe", symbol=pe_sym, premium=pe_ltp,
         ))
     else:
         pe_resp = dhan_service.place_sell_order(
