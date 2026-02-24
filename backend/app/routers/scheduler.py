@@ -1,36 +1,56 @@
 """
 Scheduler routes — add, list, and cancel scheduled execution jobs.
+
+Uses Firebase auth to identify the user, stores UID in the job
+so credentials can be resolved from Firestore at execution time.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Header
 
 from ..models import (
     ScheduleRequest,
     ScheduledJobResponse,
     JobsListResponse,
-    CancelJobRequest,
     GenericResponse,
 )
 from ..scheduler import add_scheduled_job, list_jobs, cancel_job
 
+
 router = APIRouter(prefix="/api/scheduler", tags=["Scheduler"])
 
 
+def _get_uid(authorization: str | None) -> str:
+    """Extract and verify the Bearer token, return UID."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    token = authorization[len("Bearer "):]
+    from ..firebase_auth import verify_id_token
+    try:
+        decoded = verify_id_token(token)
+        return decoded["uid"]
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired Firebase token")
+
+
 @router.post("/add", response_model=ScheduledJobResponse)
-async def schedule_job(req: ScheduleRequest):
+async def schedule_job(req: ScheduleRequest, authorization: Optional[str] = Header(None)):
     """Schedule a strategy execution at a specific time."""
+    uid = _get_uid(authorization)
+
     try:
         result = add_scheduled_job(
             execute_at=req.execute_at,
-            client_id=req.client_id,
-            access_token=req.access_token,
+            uid=uid,
             strategy=req.strategy,
             index=req.index,
             expiry=req.expiry,
             lots=req.lots,
             sl_percent=req.sl_percent,
+            mode=req.mode,
             target_premium=req.target_premium,
             spot_percent=req.spot_percent,
         )
