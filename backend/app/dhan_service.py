@@ -270,6 +270,68 @@ def _fetch_ltp(dhan: Dhan, security_id: int, exchange_segment: str) -> float:
     return 0.0
 
 
+def fetch_ltps_batch(
+    client_id: str,
+    access_token: str,
+    security_ids: list[int],
+    exchange_segment: str,
+) -> dict[int, float]:
+    """
+    Fetch LTPs for multiple security IDs in a single API call.
+
+    Returns a dict of {security_id: ltp}.
+    This avoids rate limiting from multiple sequential calls.
+    """
+    dhan = _get_dhan(client_id, access_token)
+    result: dict[int, float] = {sid: 0.0 for sid in security_ids}
+
+    for attempt in range(3):
+        try:
+            resp = dhan.quote_data({exchange_segment: security_ids})
+            logger.debug("Batch quote response: %s", resp)
+
+            # Navigate to the data dict
+            data = resp
+            if isinstance(data, dict):
+                data = data.get("data", data)
+            if isinstance(data, dict):
+                data = data.get("data", data)
+
+            # Extract LTP for each security ID
+            if isinstance(data, dict):
+                for seg_key, seg_data in data.items():
+                    if isinstance(seg_data, dict):
+                        for sid_str, quote in seg_data.items():
+                            try:
+                                sid = int(sid_str)
+                                if sid in result and isinstance(quote, dict):
+                                    for key in ("last_price", "LTP", "ltp"):
+                                        val = quote.get(key)
+                                        if val is not None and val != 0:
+                                            result[sid] = float(val)
+                                            break
+                            except (ValueError, TypeError):
+                                continue
+
+            # If all prices found, return
+            if all(v > 0 for v in result.values()):
+                return result
+
+            # If only partial, try individual calls for missing ones
+            if attempt == 2:
+                for sid in security_ids:
+                    if result[sid] == 0.0:
+                        result[sid] = _fetch_ltp(dhan, sid, exchange_segment)
+                return result
+
+        except Exception as exc:
+            logger.warning("Batch LTP fetch attempt %d failed: %s", attempt + 1, exc)
+            if attempt < 2:
+                _time.sleep(0.5)
+
+    return result
+
+
 # ----------------------------- Order Placement ----------------------------
 
 def place_sell_order(

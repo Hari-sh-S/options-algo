@@ -143,13 +143,15 @@ def _short_straddle(
     # Find security IDs from master
     ce_sec_id, pe_sec_id, ce_sym, pe_sym = _find_option_pair(index, expiry, atm_strike)
 
-    # Fetch live LTP for paper positions
+    # Fetch live LTPs for paper positions — single batch API call
     ce_ltp = 0.0
     pe_ltp = 0.0
     if is_paper:
         seg = EXCHANGE_SEGMENTS[index]
-        ce_ltp = dhan_service._fetch_ltp(dhan_service._get_dhan(client_id, access_token), int(ce_sec_id), seg)
-        pe_ltp = dhan_service._fetch_ltp(dhan_service._get_dhan(client_id, access_token), int(pe_sec_id), seg)
+        ltps = dhan_service.fetch_ltps_batch(client_id, access_token, [int(ce_sec_id), int(pe_sec_id)], seg)
+        ce_ltp = ltps.get(int(ce_sec_id), 0.0)
+        pe_ltp = ltps.get(int(pe_sec_id), 0.0)
+        logger.info("Paper straddle LTPs — CE: %.2f, PE: %.2f", ce_ltp, pe_ltp)
 
     legs = []
 
@@ -307,13 +309,15 @@ def _spot_strangle(
     ce_sec_id, _, ce_sym, _ = _find_option_pair(index, expiry, ce_strike)
     _, pe_sec_id, _, pe_sym = _find_option_pair(index, expiry, pe_strike)
 
-    # Fetch live LTP for paper positions
+    # Fetch live LTPs for paper positions — single batch API call
     ce_ltp = 0.0
     pe_ltp = 0.0
     if is_paper:
         seg = EXCHANGE_SEGMENTS[index]
-        ce_ltp = dhan_service._fetch_ltp(dhan_service._get_dhan(client_id, access_token), int(ce_sec_id), seg)
-        pe_ltp = dhan_service._fetch_ltp(dhan_service._get_dhan(client_id, access_token), int(pe_sec_id), seg)
+        ltps = dhan_service.fetch_ltps_batch(client_id, access_token, [int(ce_sec_id), int(pe_sec_id)], seg)
+        ce_ltp = ltps.get(int(ce_sec_id), 0.0)
+        pe_ltp = ltps.get(int(pe_sec_id), 0.0)
+        logger.info("Paper strangle LTPs — CE: %.2f, PE: %.2f", ce_ltp, pe_ltp)
 
     legs = []
 
