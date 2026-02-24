@@ -76,7 +76,7 @@ export default function Header({ idToken, activeTab, onTabChange }: HeaderProps)
                         </svg>
                     </div>
                     <h1 className="text-lg font-bold text-white tracking-tight">
-                        Options Execution Portal
+                        OptionI
                     </h1>
                 </div>
 
@@ -108,8 +108,8 @@ export default function Header({ idToken, activeTab, onTabChange }: HeaderProps)
                             key={tab.value}
                             onClick={() => onTabChange(tab.value)}
                             className={`flex items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-xs font-medium rounded-t-lg transition-all duration-200 ${activeTab === tab.value
-                                    ? "bg-white/10 text-white border-b-2 border-violet-500 shadow-[0_2px_10px_rgba(139,92,246,0.15)]"
-                                    : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+                                ? "bg-white/10 text-white border-b-2 border-violet-500 shadow-[0_2px_10px_rgba(139,92,246,0.15)]"
+                                : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
                                 }`}
                         >
                             {tab.icon}

@@ -9,7 +9,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Options Execution Portal",
+  title: "OptionI",
   description:
     "Automated options trading dashboard for the Indian stock market via the Dhan brokerage API.",
 };

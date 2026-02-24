@@ -10,6 +10,7 @@ import EntrySummary from "@/components/EntrySummary";
 import LivePositions from "@/components/LivePositions";
 import HelpTab from "@/components/HelpTab";
 import ProfileTab from "@/components/ProfileTab";
+import ScheduledJobs from "@/components/ScheduledJobs";
 import { usePositions } from "@/hooks/useMarketData";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -65,6 +66,7 @@ export default function Dashboard() {
                   onModeChange={setMode}
                   onExecuted={handleExecuted}
                 />
+                <ScheduledJobs idToken={idToken} />
               </div>
               {/* Right Column */}
               <div className="lg:col-span-5 space-y-6">
@@ -102,7 +104,7 @@ export default function Dashboard() {
 
         {/* Footer */}
         <footer className="border-t border-white/5 py-4 text-center text-xs text-slate-600">
-          Options Execution Portal · Powered by Dhan API · For educational purposes only
+          OptionI · Powered by Dhan API · For educational purposes only
         </footer>
       </div>
     </div>
