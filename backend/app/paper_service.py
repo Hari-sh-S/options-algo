@@ -67,10 +67,13 @@ def place_sell_order(
         "buyQty": 0,
         "sellQty": quantity,
         "costPrice": premium or price,
+        "sellAvg": premium or price,
         "ltp": premium or price,
         "realizedProfit": 0,
         "unrealizedProfit": 0,
         "productType": product_type,
+        "exchangeSegment": exchange_segment,
+        "is_paper": True,
     })
 
     logger.info(f"📄 PAPER sell order: {symbol} qty={quantity} premium={premium} → {order_id}")

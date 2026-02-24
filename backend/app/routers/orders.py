@@ -128,6 +128,65 @@ async def execute_order(req: ExecuteRequest, authorization: Optional[str] = Head
             error=str(exc),
         )
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def _refresh_paper_ltps(
+    paper_pos: list[dict],
+    client_id: str,
+    access_token: str,
+) -> None:
+    """
+    Batch-fetch live LTPs for paper positions and update them in-place.
+    Groups security IDs by exchange segment to minimize API calls.
+    """
+    from collections import defaultdict
+
+    # Group security IDs by exchange segment
+    seg_groups: dict[str, list[int]] = defaultdict(list)
+    for pos in paper_pos:
+        sec_id = pos.get("securityId")
+        seg = pos.get("exchangeSegment", "NSE_FNO")
+        if sec_id:
+            try:
+                seg_groups[seg].append(int(sec_id))
+            except (ValueError, TypeError):
+                continue
+
+    if not seg_groups:
+        return
+
+    # Fetch LTPs in batches (one call per exchange segment)
+    all_ltps: dict[int, float] = {}
+    for seg, sec_ids in seg_groups.items():
+        try:
+            batch = dhan_service.fetch_ltps_batch(client_id, access_token, sec_ids, seg)
+            all_ltps.update(batch)
+        except Exception as exc:
+            logger.warning("Failed to refresh paper LTPs for segment %s: %s", seg, exc)
+
+    # Update each paper position with live data
+    for pos in paper_pos:
+        sec_id = pos.get("securityId")
+        if not sec_id:
+            continue
+        try:
+            sid = int(sec_id)
+        except (ValueError, TypeError):
+            continue
+
+        live_ltp = all_ltps.get(sid)
+        if live_ltp and live_ltp > 0:
+            pos["ltp"] = live_ltp
+            # P&L for short positions: (entry - current) × qty
+            cost = float(pos.get("costPrice", 0) or pos.get("sellAvg", 0) or 0)
+            net_qty = pos.get("netQty", 0)
+            if cost > 0 and net_qty != 0:
+                # For short (negative qty): profit when LTP < cost
+                pos["unrealizedProfit"] = round((cost - live_ltp) * abs(net_qty), 2)
+
 
 @router.post("/positions", response_model=PositionsResponse)
 async def get_positions(
@@ -140,6 +199,10 @@ async def get_positions(
 
         paper_pos = paper_service.get_positions()
         raw_positions = dhan_service.get_positions(client_id, access_token) if client_id else []
+
+        # ── Refresh paper position LTPs with live market data ──
+        if paper_pos and client_id and access_token:
+            _refresh_paper_ltps(paper_pos, client_id, access_token)
 
         all_positions = list(raw_positions) + list(paper_pos)
 
