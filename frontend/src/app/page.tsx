@@ -6,7 +6,7 @@ import Header, { type TabName } from "@/components/Header";
 import CredentialsPanel from "@/components/CredentialsPanel";
 import StrategyConfig from "@/components/StrategyConfig";
 import InfoCards from "@/components/InfoCards";
-import EntrySummary from "@/components/EntrySummary";
+import OrderHistory from "@/components/EntrySummary";
 import LivePositions from "@/components/LivePositions";
 import HelpTab from "@/components/HelpTab";
 import ProfileTab from "@/components/ProfileTab";
@@ -20,12 +20,12 @@ export default function Dashboard() {
   const { idToken } = useAuth();
   const [mode, setMode] = useState<"paper" | "live">("paper");
   const [activeTab, setActiveTab] = useState<TabName>("dashboard");
-  const [lastResult, setLastResult] = useState<ExecuteResponse | null>(null);
+  const [orderHistory, setOrderHistory] = useState<ExecuteResponse[]>([]);
   const { data: positionsData, refresh: refreshPositions } = usePositions(idToken);
 
   const handleExecuted = useCallback(
     (result: ExecuteResponse) => {
-      setLastResult(result);
+      setOrderHistory((prev) => [...prev, result]);
       setTimeout(refreshPositions, 2000);
     },
     [refreshPositions]
@@ -68,14 +68,14 @@ export default function Dashboard() {
                 />
                 <ScheduledJobs idToken={idToken} />
               </div>
-              {/* Right Column */}
+              {/* Right Column — Live Positions first, Order History below */}
               <div className="lg:col-span-5 space-y-6">
-                <EntrySummary result={lastResult} />
                 <LivePositions
                   idToken={idToken}
                   data={positionsData}
                   onRefresh={refreshPositions}
                 />
+                <OrderHistory results={orderHistory} />
               </div>
             </div>
           )}

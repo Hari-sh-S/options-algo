@@ -41,6 +41,7 @@ def execute_strategy(
     target_premium: float | None = None,
     spot_percent: float | None = None,
     mode: str = "live",
+    uid: str = "",
 ) -> dict[str, Any]:
     """
     Dispatch to the appropriate strategy, execute orders, then hand off to
@@ -59,15 +60,15 @@ def execute_strategy(
 
     try:
         if strategy == StrategyType.SHORT_STRADDLE:
-            result = _short_straddle(client_id, access_token, index, expiry, quantity, exchange_segment, is_paper)
+            result = _short_straddle(client_id, access_token, index, expiry, quantity, exchange_segment, is_paper, uid=uid)
         elif strategy == StrategyType.PREMIUM_BASED:
             if target_premium is None:
                 return _error("target_premium is required for Premium Based strategy")
-            result = _premium_based(client_id, access_token, index, expiry, quantity, exchange_segment, target_premium, is_paper)
+            result = _premium_based(client_id, access_token, index, expiry, quantity, exchange_segment, target_premium, is_paper, uid=uid)
         elif strategy == StrategyType.SPOT_STRANGLE:
             if spot_percent is None:
                 return _error("spot_percent is required for Spot Based Strangle strategy")
-            result = _spot_strangle(client_id, access_token, index, expiry, quantity, exchange_segment, spot_percent, is_paper)
+            result = _spot_strangle(client_id, access_token, index, expiry, quantity, exchange_segment, spot_percent, is_paper, uid=uid)
         else:
             return _error(f"Unknown strategy: {strategy}")
 
@@ -92,6 +93,7 @@ def execute_strategy(
                         quantity=quantity,
                         trigger_price=trigger,
                         tag=f"sl_{leg.get('leg', '').lower()}",
+                        uid=uid,
                     )
                     parsed = dhan_service._parse_order_response(sl_resp)
                     parsed["leg"] = f"SL-{leg.get('leg', '?')}"
@@ -130,6 +132,7 @@ def _short_straddle(
     quantity: int,
     exchange_segment: str,
     is_paper: bool = False,
+    uid: str = "",
 ) -> dict[str, Any]:
     """
     Short Straddle: Sell ATM CE + ATM PE at the same strike.
@@ -158,7 +161,7 @@ def _short_straddle(
     # Sell CE
     if is_paper:
         ce_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
-            security_id=ce_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="straddle_ce", symbol=ce_sym, premium=ce_ltp,
+            security_id=ce_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="straddle_ce", symbol=ce_sym, premium=ce_ltp, uid=uid,
         ))
     else:
         ce_resp = dhan_service.place_sell_order(
@@ -177,7 +180,7 @@ def _short_straddle(
     # Sell PE
     if is_paper:
         pe_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
-            security_id=pe_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="straddle_pe", symbol=pe_sym, premium=pe_ltp,
+            security_id=pe_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="straddle_pe", symbol=pe_sym, premium=pe_ltp, uid=uid,
         ))
     else:
         pe_resp = dhan_service.place_sell_order(
@@ -206,6 +209,7 @@ def _premium_based(
     exchange_segment: str,
     target_premium: float,
     is_paper: bool = False,
+    uid: str = "",
 ) -> dict[str, Any]:
     """
     Premium Based: Scan the option chain and pick CE & PE whose LTP is
@@ -231,7 +235,7 @@ def _premium_based(
     if is_paper:
         ce_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
             security_id=best_ce["ce_security_id"], exchange_segment=exchange_segment, quantity=quantity,
-            tag="premium_ce", symbol=best_ce.get("ce_symbol", ""), premium=best_ce["ce_ltp"],
+            tag="premium_ce", symbol=best_ce.get("ce_symbol", ""), premium=best_ce["ce_ltp"], uid=uid,
         ))
     else:
         ce_resp = dhan_service.place_sell_order(
@@ -252,7 +256,7 @@ def _premium_based(
     if is_paper:
         pe_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
             security_id=best_pe["pe_security_id"], exchange_segment=exchange_segment, quantity=quantity,
-            tag="premium_pe", symbol=best_pe.get("pe_symbol", ""), premium=best_pe["pe_ltp"],
+            tag="premium_pe", symbol=best_pe.get("pe_symbol", ""), premium=best_pe["pe_ltp"], uid=uid,
         ))
     else:
         pe_resp = dhan_service.place_sell_order(
@@ -282,6 +286,7 @@ def _spot_strangle(
     exchange_segment: str,
     spot_percent: float,
     is_paper: bool = False,
+    uid: str = "",
 ) -> dict[str, Any]:
     """
     Spot Based Strangle: Select OTM strikes at ±X% from spot, then sell both.
@@ -324,7 +329,7 @@ def _spot_strangle(
     # Sell OTM CE
     if is_paper:
         ce_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
-            security_id=ce_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="strangle_ce", symbol=ce_sym, premium=ce_ltp,
+            security_id=ce_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="strangle_ce", symbol=ce_sym, premium=ce_ltp, uid=uid,
         ))
     else:
         ce_resp = dhan_service.place_sell_order(
@@ -343,7 +348,7 @@ def _spot_strangle(
     # Sell OTM PE
     if is_paper:
         pe_resp = dhan_service._parse_order_response(paper_service.place_sell_order(
-            security_id=pe_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="strangle_pe", symbol=pe_sym, premium=pe_ltp,
+            security_id=pe_sec_id, exchange_segment=exchange_segment, quantity=quantity, tag="strangle_pe", symbol=pe_sym, premium=pe_ltp, uid=uid,
         ))
     else:
         pe_resp = dhan_service.place_sell_order(

@@ -1,28 +1,69 @@
 """
 Paper trading service — simulates order execution without touching Dhan API.
 
-Keeps an in-memory ledger of simulated positions and P&L.
-Uses real market data (spot prices, option chain) but fake order placement.
+Keeps positions in Firestore (keyed by user UID) so they survive server
+restarts and deployments.  Positions created today are kept until
+the next calendar day (IST), then auto-cleared.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
-from typing import Any, Optional
+from datetime import datetime, date
+from typing import Any
 
 from .config import IST
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# In-memory paper ledger
+# Firestore helpers
 # ---------------------------------------------------------------------------
 
-_paper_positions: list[dict[str, Any]] = []
-_paper_orders: list[dict[str, Any]] = []
+def _db():
+    """Lazy import so firebase_admin is only loaded when needed."""
+    from .firebase_auth import _db as db
+    return db
 
+
+def _collection(uid: str):
+    """Return the Firestore document reference for a user's paper data."""
+    return _db().collection("paper_trading").document(uid)
+
+
+def _today_key() -> str:
+    """Return today's date in IST as YYYY-MM-DD."""
+    return datetime.now(IST).strftime("%Y-%m-%d")
+
+
+def _load(uid: str) -> dict:
+    """Load paper trading data from Firestore, auto-clearing if stale."""
+    doc = _collection(uid).get()
+    if not doc.exists:
+        return {"date": _today_key(), "positions": [], "orders": []}
+
+    data = doc.to_dict()
+    stored_date = data.get("date", "")
+
+    # Auto-clear if positions are from a previous day
+    if stored_date != _today_key():
+        logger.info("📄 PAPER: Clearing stale positions from %s (today=%s)", stored_date, _today_key())
+        _collection(uid).delete()
+        return {"date": _today_key(), "positions": [], "orders": []}
+
+    return data
+
+
+def _save(uid: str, data: dict) -> None:
+    """Save paper trading data to Firestore."""
+    data["date"] = _today_key()
+    _collection(uid).set(data)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 def place_sell_order(
     security_id: str,
@@ -35,6 +76,7 @@ def place_sell_order(
     tag: str = "",
     premium: float = 0.0,
     symbol: str = "",
+    uid: str = "",
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Simulate a SELL order — log it and return a fake order response."""
@@ -55,10 +97,8 @@ def place_sell_order(
         "status": "TRADED",
         "timestamp": now,
     }
-    _paper_orders.append(order)
 
-    # Add to positions
-    _paper_positions.append({
+    position = {
         "securityId": security_id,
         "tradingSymbol": symbol or f"SIM-{security_id}",
         "optionType": tag.split("-")[0] if "-" in tag else "",
@@ -74,7 +114,16 @@ def place_sell_order(
         "productType": product_type,
         "exchangeSegment": exchange_segment,
         "is_paper": True,
-    })
+    }
+
+    # Persist to Firestore if UID is provided
+    if uid:
+        data = _load(uid)
+        data["orders"].append(order)
+        data["positions"].append(position)
+        _save(uid, data)
+    else:
+        logger.warning("📄 PAPER sell order without UID — position won't persist")
 
     logger.info(f"📄 PAPER sell order: {symbol} qty={quantity} premium={premium} → {order_id}")
 
@@ -92,6 +141,7 @@ def place_sl_buy_order(
     trigger_price: float,
     product_type: str = "INTRADAY",
     tag: str = "",
+    uid: str = "",
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Simulate a SL-M BUY order."""
@@ -111,7 +161,11 @@ def place_sl_buy_order(
         "status": "PENDING",
         "timestamp": now,
     }
-    _paper_orders.append(order)
+
+    if uid:
+        data = _load(uid)
+        data["orders"].append(order)
+        _save(uid, data)
 
     logger.info(f"📄 PAPER SL order: qty={quantity} trigger={trigger_price} → {order_id}")
 
@@ -122,27 +176,37 @@ def place_sl_buy_order(
     }
 
 
-def get_positions() -> list[dict[str, Any]]:
-    """Return all simulated positions."""
-    return list(_paper_positions)
+def get_positions(uid: str = "") -> list[dict[str, Any]]:
+    """Return all simulated positions (from Firestore if UID provided)."""
+    if uid:
+        data = _load(uid)
+        return list(data.get("positions", []))
+    return []
 
 
-def get_orders() -> list[dict[str, Any]]:
+def get_orders(uid: str = "") -> list[dict[str, Any]]:
     """Return all simulated orders."""
-    return list(_paper_orders)
+    if uid:
+        data = _load(uid)
+        return list(data.get("orders", []))
+    return []
 
 
-def square_off_all() -> dict[str, Any]:
+def square_off_all(uid: str = "") -> dict[str, Any]:
     """Clear all paper positions."""
-    count = len(_paper_positions)
-    _paper_positions.clear()
-    _paper_orders.clear()
+    if uid:
+        data = _load(uid)
+        count = len(data.get("positions", []))
+        data["positions"] = []
+        _save(uid, data)
+    else:
+        count = 0
     logger.info(f"📄 PAPER: Squared off {count} simulated position(s)")
     return {"success": True, "squared_off": count}
 
 
-def reset() -> None:
+def reset(uid: str = "") -> None:
     """Clear all paper trading data."""
-    _paper_positions.clear()
-    _paper_orders.clear()
+    if uid:
+        _collection(uid).delete()
     logger.info("📄 PAPER: Ledger reset")

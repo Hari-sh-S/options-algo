@@ -201,5 +201,6 @@ def _execute_scheduled(
         target_premium=target_premium,
         spot_percent=spot_percent,
         mode=mode,
+        uid=uid,
     )
     logger.info("Scheduled job result: success=%s, %s", result.get("success"), result)

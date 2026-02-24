@@ -61,11 +61,24 @@ def _resolve_credentials(
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
+def _resolve_uid(authorization: str | None) -> str:
+    """Extract Firebase UID from the Authorization header. Returns '' if unavailable."""
+    if authorization and authorization.startswith("Bearer "):
+        from ..firebase_auth import verify_id_token
+        try:
+            decoded = verify_id_token(authorization[len("Bearer "):])
+            return decoded.get("uid", "")
+        except Exception:
+            pass
+    return ""
+
+
 @router.post("/execute", response_model=ExecuteResponse)
 async def execute_order(req: ExecuteRequest, authorization: Optional[str] = Header(None)):
     """Execute a strategy immediately (live or paper)."""
     try:
         client_id, access_token = _resolve_credentials(req, authorization)
+        uid = _resolve_uid(authorization)
 
         result = execute_strategy(
             client_id=client_id,
@@ -78,6 +91,7 @@ async def execute_order(req: ExecuteRequest, authorization: Optional[str] = Head
             target_premium=req.target_premium,
             spot_percent=req.spot_percent,
             mode=req.mode,
+            uid=uid,
         )
 
         legs = [
@@ -196,8 +210,9 @@ async def get_positions(
     """Fetch all open positions with P&L."""
     try:
         client_id, access_token = _resolve_credentials(req, authorization)
+        uid = _resolve_uid(authorization)
 
-        paper_pos = paper_service.get_positions()
+        paper_pos = paper_service.get_positions(uid=uid)
         raw_positions = dhan_service.get_positions(client_id, access_token) if client_id else []
 
         # ── Refresh paper position LTPs with live market data ──
@@ -265,9 +280,10 @@ async def square_off(
 ):
     """Square off all open positions and cancel pending orders."""
     client_id, access_token = _resolve_credentials(req, authorization)
+    uid = _resolve_uid(authorization)
 
     # Square off paper positions
-    paper_result = paper_service.square_off_all()
+    paper_result = paper_service.square_off_all(uid=uid)
     paper_count = paper_result.get("squared_off", 0)
 
     # Square off live positions
