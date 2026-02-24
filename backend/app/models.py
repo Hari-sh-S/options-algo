@@ -17,8 +17,8 @@ from .config import IndexName, StrategyType
 # ---------------------------------------------------------------------------
 
 class Credentials(BaseModel):
-    client_id: str = Field(..., description="Dhan Client ID")
-    access_token: str = Field(..., description="Dhan Access Token")
+    client_id: Optional[str] = Field(None, description="Dhan Client ID")
+    access_token: Optional[str] = Field(None, description="Dhan Access Token")
 
 
 # ---------------------------------------------------------------------------
