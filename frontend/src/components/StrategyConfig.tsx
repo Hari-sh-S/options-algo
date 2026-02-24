@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
     fetchExpiries,
     executeOrder,
@@ -20,6 +20,31 @@ const INDICES = [
     { value: "NIFTY", label: "NIFTY", lot: 25 },
     { value: "SENSEX", label: "SENSEX", lot: 20 },
 ] as const;
+
+// ── Expiry localStorage cache helpers ──
+function getExpiryCacheKey(idx: string): string {
+    const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+    return `expiries_${idx}_${today}`;
+}
+function getCachedExpiries(idx: string): string[] | null {
+    try {
+        const raw = localStorage.getItem(getExpiryCacheKey(idx));
+        if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    return null;
+}
+function setCachedExpiries(idx: string, expiries: string[]): void {
+    try {
+        // Clear old keys for this index
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key?.startsWith(`expiries_${idx}_`) && key !== getExpiryCacheKey(idx)) {
+                localStorage.removeItem(key);
+            }
+        }
+        localStorage.setItem(getExpiryCacheKey(idx), JSON.stringify(expiries));
+    } catch { /* ignore */ }
+}
 
 interface StrategyConfigProps {
     idToken: string | null;
@@ -46,12 +71,25 @@ export default function StrategyConfig({ idToken, mode, onModeChange, onExecuted
     const currentLot = INDICES.find((i) => i.value === index)?.lot || 75;
     const totalQty = lots * currentLot;
 
+    // Auto-load cached expiries on mount and when index changes
+    useEffect(() => {
+        const cached = getCachedExpiries(index);
+        if (cached && cached.length > 0) {
+            setExpiries(cached);
+            setExpiry(cached[0]);
+        } else {
+            setExpiries([]);
+            setExpiry("");
+        }
+    }, [index]);
+
     const handleFetchExpiries = async () => {
         setFetchingExpiries(true);
         setError(null);
         try {
             const res = await fetchExpiries(index);
             setExpiries(res.expiries);
+            setCachedExpiries(index, res.expiries);
             if (res.expiries.length > 0) setExpiry(res.expiries[0]);
         } catch (e: any) {
             setError(e.message);

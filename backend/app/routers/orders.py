@@ -154,6 +154,22 @@ async def get_positions(
             pnl = pos.get("realizedProfit", 0) + pos.get("unrealizedProfit", 0)
             total_pnl += pnl
 
+            # Resolve average price: costPrice > buyAvg/sellAvg > dayBuyAvg/daySellAvg
+            avg = float(pos.get("costPrice", 0) or 0)
+            if avg == 0:
+                if net_qty > 0:
+                    avg = float(pos.get("buyAvg", 0) or pos.get("dayBuyAvg", 0) or 0)
+                else:
+                    avg = float(pos.get("sellAvg", 0) or pos.get("daySellAvg", 0) or 0)
+
+            # Resolve LTP
+            ltp = float(
+                pos.get("ltp", 0)
+                or pos.get("lastPrice", 0)
+                or pos.get("last_traded_price", 0)
+                or 0
+            )
+
             positions.append(
                 PositionItem(
                     security_id=str(pos.get("securityId", "")),
@@ -161,8 +177,8 @@ async def get_positions(
                     option_type=pos.get("optionType", ""),
                     strike_price=float(pos.get("strikePrice", 0)),
                     quantity=int(net_qty),
-                    avg_price=float(pos.get("costPrice", pos.get("avgPrice", 0))),
-                    ltp=float(pos.get("ltp", pos.get("lastPrice", 0))),
+                    avg_price=round(avg, 2),
+                    ltp=round(ltp, 2),
                     pnl=round(pnl, 2),
                     product_type=pos.get("productType", ""),
                 )
