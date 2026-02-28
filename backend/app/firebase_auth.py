@@ -1,18 +1,42 @@
 """
 Firebase Admin SDK — token verification + Firestore credential vault.
 
-On Cloud Run, Application Default Credentials are auto-detected.
-Locally, set GOOGLE_APPLICATION_CREDENTIALS to your service-account JSON.
+Initialisation priority:
+  1. GOOGLE_APPLICATION_CREDENTIALS env-var (local dev with JSON key file)
+  2. FIREBASE_PROJECT_ID + FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY
+     env-vars (Oracle Cloud, Render, or any non-Google host)
+  3. Application Default Credentials (Google Cloud Run)
 """
 
 from __future__ import annotations
 
-import firebase_admin
-from firebase_admin import auth, credentials, firestore
+import os
 
-# Initialise once — uses ADC on Cloud Run, env-var locally
+import firebase_admin
+from firebase_admin import auth, credentials as fb_credentials, firestore
+
+# Initialise once
 if not firebase_admin._apps:
-    firebase_admin.initialize_app()
+    project_id = os.environ.get("FIREBASE_PROJECT_ID")
+    client_email = os.environ.get("FIREBASE_CLIENT_EMAIL")
+    private_key = os.environ.get("FIREBASE_PRIVATE_KEY")
+
+    if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        # Local dev — JSON key file
+        firebase_admin.initialize_app()
+    elif project_id and client_email and private_key:
+        # Oracle / Render / any non-Google host — explicit env vars
+        cred = fb_credentials.Certificate({
+            "type": "service_account",
+            "project_id": project_id,
+            "private_key": private_key.replace("\\n", "\n"),
+            "client_email": client_email,
+            "token_uri": "https://oauth2.googleapis.com/token",
+        })
+        firebase_admin.initialize_app(cred)
+    else:
+        # Google Cloud Run — ADC auto-detected
+        firebase_admin.initialize_app()
 
 _db = firestore.client()
 

@@ -8,6 +8,7 @@ Run in development:
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -50,15 +51,20 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# CORS — allow the Next.js frontend (localhost:3000 by default)
+# CORS — configurable via CORS_ORIGINS env var (comma-separated)
 # ---------------------------------------------------------------------------
+_default_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://optioni.web.app",
+    "https://optioni.firebaseapp.com",
+]
+_env_origins = os.environ.get("CORS_ORIGINS", "")
+_origins = [o.strip() for o in _env_origins.split(",") if o.strip()] if _env_origins else _default_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "*",  # in production, lock this down
-    ],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
