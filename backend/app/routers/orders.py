@@ -300,3 +300,16 @@ async def square_off(
         success=True,
         message=f"Squared off {total} position(s) ({paper_count} paper, {live_count} live)",
     )
+
+
+@router.post("/margin")
+async def get_margin(
+    req: Credentials | None = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Fetch account fund limits (available / used margin)."""
+    client_id, access_token = _resolve_credentials(req, authorization)
+    result = dhan_service.get_fund_limits(client_id, access_token)
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Failed to fetch margin"))
+    return result

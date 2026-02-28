@@ -276,6 +276,28 @@ export async function squareOffAll(
     return res.json();
 }
 
+// ── Margin ────────────────────────────────────────────────────────────────
+
+export interface MarginResponse {
+    success: boolean;
+    available: number;
+    used: number;
+    collateral: number;
+    error?: string | null;
+}
+
+export async function fetchMargin(
+    idToken: string
+): Promise<MarginResponse> {
+    const res = await fetch(`${API_BASE}/api/orders/margin`, {
+        method: "POST",
+        headers: authHeaders(idToken),
+        body: JSON.stringify({}),
+    });
+    if (!res.ok) throw new Error("Failed to fetch margin");
+    return res.json();
+}
+
 // ── Scheduler ─────────────────────────────────────────────────────────────
 
 export interface SchedulePayload extends ExecutePayload {

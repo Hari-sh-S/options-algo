@@ -6,6 +6,7 @@ import Header, { type TabName } from "@/components/Header";
 import CredentialsPanel from "@/components/CredentialsPanel";
 import StrategyConfig from "@/components/StrategyConfig";
 import InfoCards from "@/components/InfoCards";
+import MarginCard from "@/components/MarginCard";
 import OrderHistory from "@/components/EntrySummary";
 import LivePositions from "@/components/LivePositions";
 import PnlDashboard from "@/components/PnlDashboard";
@@ -71,6 +72,7 @@ export default function Dashboard() {
               </div>
               {/* Right Column */}
               <div className="lg:col-span-5 space-y-6">
+                <MarginCard idToken={idToken} />
                 <LivePositions
                   idToken={idToken}
                   data={positionsData}

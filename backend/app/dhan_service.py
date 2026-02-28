@@ -509,3 +509,24 @@ def square_off_all(client_id: str, access_token: str) -> dict[str, Any]:
     except Exception as exc:
         logger.exception("Square-off failed")
         return {"success": False, "error": str(exc)}
+
+
+# ----------------------------- Fund Limits --------------------------------
+
+def get_fund_limits(client_id: str, access_token: str) -> dict[str, Any]:
+    """Fetch account fund limits (available/used margin) from Dhan."""
+    dhan = _get_dhan(client_id, access_token)
+    try:
+        resp = dhan.get_fund_limits()
+        data = resp if isinstance(resp, dict) else {}
+        # Dhan response: {status, data: {availabelBalance, utilizedAmount, ...}}
+        fund_data = data.get("data", data)
+        return {
+            "success": True,
+            "available": float(fund_data.get("availabelBalance", 0) or 0),
+            "used": float(fund_data.get("utilizedAmount", 0) or 0),
+            "collateral": float(fund_data.get("collateralAmount", 0) or 0),
+        }
+    except Exception as exc:
+        logger.exception("Failed to fetch fund limits")
+        return {"success": False, "error": str(exc), "available": 0, "used": 0, "collateral": 0}
