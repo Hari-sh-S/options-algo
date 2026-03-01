@@ -25,6 +25,7 @@ class CredentialStatus(BaseModel):
     has_api_key: bool = False
     has_access_token: bool = False
     client_id_preview: str | None = None
+    token_generated_at: str | None = None
 
 
 def _get_uid(authorization: str) -> str:
@@ -65,6 +66,7 @@ async def credential_status(authorization: str = Header(...)):
             has_api_key=bool(creds.get("app_id") and creds.get("app_secret")),
             has_access_token=bool(creds.get("access_token")),
             client_id_preview=preview,
+            token_generated_at=creds.get("token_generated_at"),
         )
     return CredentialStatus(has_credentials=False)
 

@@ -58,6 +58,7 @@ def get_user_credentials(uid: str) -> dict | None:
             "access_token": data.get("dhan_access_token", ""),
             "app_id": data.get("dhan_app_id", ""),
             "app_secret": data.get("dhan_app_secret", ""),
+            "token_generated_at": data.get("token_generated_at", ""),
         }
     return None
 
@@ -68,6 +69,7 @@ def save_user_credentials(
     access_token: str = "",
     app_id: str = "",
     app_secret: str = "",
+    token_generated_at: str = "",
 ) -> None:
     """Save (or overwrite) Dhan API credentials in Firestore."""
     doc: dict = {}
@@ -79,6 +81,8 @@ def save_user_credentials(
         doc["dhan_app_id"] = app_id
     if app_secret:
         doc["dhan_app_secret"] = app_secret
+    if token_generated_at:
+        doc["token_generated_at"] = token_generated_at
 
     if doc:
         _db.collection(USERS_COLLECTION).document(uid).set(doc, merge=True)

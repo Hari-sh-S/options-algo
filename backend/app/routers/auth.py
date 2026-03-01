@@ -70,6 +70,7 @@ async def dhan_callback(req: CallbackRequest, authorization: str = Header(...)):
     try:
         result = exchange_token(req.token_id, creds["app_id"], creds["app_secret"])
         access_token = result["access_token"]
+        now_ist = datetime.now(IST).isoformat()
 
         # Save the access token to Firestore
         save_user_credentials(
@@ -78,11 +79,13 @@ async def dhan_callback(req: CallbackRequest, authorization: str = Header(...)):
             access_token=access_token,
             app_id=creds["app_id"],
             app_secret=creds["app_secret"],
+            token_generated_at=now_ist,
         )
 
         return {
             "success": True,
             "message": "Dhan connected successfully! Token valid for 24 hours.",
+            "token_generated_at": now_ist,
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Token exchange failed: {exc}")

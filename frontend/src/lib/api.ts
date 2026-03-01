@@ -52,6 +52,7 @@ export interface CredentialStatus {
     has_api_key: boolean;
     has_access_token: boolean;
     client_id_preview: string | null;
+    token_generated_at: string | null;
 }
 
 export async function saveCredentials(
