@@ -165,8 +165,19 @@ def _extract_ltp_from_quote(resp: Any) -> float | None:
     return None
 
 
+from cachetools import TTLCache
+import time as _time
+
+# Global caches to prevent Dhan API 805 Rate Limit Errors
+_spot_cache = TTLCache(maxsize=20, ttl=10)
+_ltp_cache = TTLCache(maxsize=1000, ttl=5)
+
 def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float:
     """Fetch the real-time spot price (LTP) for the underlying index."""
+    global _spot_cache
+    if index in _spot_cache:
+        return _spot_cache[index]
+
     dhan = _get_dhan(client_id, access_token)
     sec_id = UNDERLYING_SECURITY_IDS[index]
 
@@ -178,6 +189,7 @@ def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float
         resp = dhan.quote_data({exchange_key: [sec_id]})
         ltp = _extract_ltp_from_quote(resp)
         if ltp is not None:
+            _spot_cache[index] = ltp
             return ltp
         raise ValueError(f"Could not find last_price in response: {resp}")
     except Exception as exc:
@@ -278,17 +290,31 @@ def fetch_ltps_batch(
 ) -> dict[int, float]:
     """
     Fetch LTPs for multiple security IDs in a single API call.
-
     Returns a dict of {security_id: ltp}.
-    This avoids rate limiting from multiple sequential calls.
+    Uses TTL Cache to avoid 805 Rate Limit errors.
     """
+    global _ltp_cache
+    result: dict[int, float] = {}
+    missing_sids: list[int] = []
+
+    # Check cache first
+    for sid in security_ids:
+        key = (exchange_segment, sid)
+        if key in _ltp_cache:
+            result[sid] = _ltp_cache[key]
+        else:
+            missing_sids.append(sid)
+            result[sid] = 0.0
+
+    if not missing_sids:
+        return result
+
     dhan = _get_dhan(client_id, access_token)
-    result: dict[int, float] = {sid: 0.0 for sid in security_ids}
 
     for attempt in range(3):
         try:
-            resp = dhan.quote_data({exchange_segment: security_ids})
-            logger.debug("Batch quote response: %s", resp)
+            resp = dhan.quote_data({exchange_segment: missing_sids})
+            logger.error("DEBUG BATCH QUOTE RESPONSE (missing_sids): %s", resp)
 
             # Navigate to the data dict
             data = resp
@@ -308,20 +334,25 @@ def fetch_ltps_batch(
                                     for key in ("last_price", "LTP", "ltp"):
                                         val = quote.get(key)
                                         if val is not None and val != 0:
-                                            result[sid] = float(val)
+                                            val_float = float(val)
+                                            result[sid] = val_float
+                                            _ltp_cache[(exchange_segment, sid)] = val_float
                                             break
                             except (ValueError, TypeError):
                                 continue
 
-            # If all prices found, return
-            if all(v > 0 for v in result.values()):
+            # If all missing prices found, return
+            if all(result[sid] > 0 for sid in missing_sids):
                 return result
 
             # If only partial, try individual calls for missing ones
             if attempt == 2:
-                for sid in security_ids:
+                for sid in missing_sids:
                     if result[sid] == 0.0:
-                        result[sid] = _fetch_ltp(dhan, sid, exchange_segment)
+                        val = _fetch_ltp(dhan, sid, exchange_segment)
+                        result[sid] = val
+                        if val > 0:
+                            _ltp_cache[(exchange_segment, sid)] = val
                 return result
 
         except Exception as exc:
