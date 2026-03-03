@@ -234,28 +234,27 @@ def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float
 
     # --- Strategy 2: option_chain (returns underlyingValue = live spot price) ---
     try:
-        # Find nearest upcoming expiry from master CSV
-        df = _ensure_master()
-        sym_prefix = "NIFTY" if index == IndexName.NIFTY else "SENSEX"
-        seg = EXCHANGE_SEGMENTS[index]
-        mask = (
-            df["SEM_TRADING_SYMBOL"].str.startswith(sym_prefix, na=False)
-            & df["SEM_INSTRUMENT_NAME"].isin(["OPTIDX"])
+        # Get accepted expiry dates directly from Dhan
+        exp_list_resp = dhan.expiry_list(
+            under_security_id=sec_id,       # integer
+            under_exchange_segment=Dhan.INDEX,
         )
-        filtered = df.loc[mask].copy()
-        filtered["_exp"] = pd.to_datetime(filtered["SEM_EXPIRY_DATE"], errors="coerce").dt.date
-        today = date.today()
-        future_expiries = sorted(filtered[filtered["_exp"] >= today]["_exp"].dropna().unique())
-        if not future_expiries:
-            raise ValueError("No upcoming expiry in master CSV")
-        nearest_expiry = future_expiries[0].strftime("%Y-%m-%d")
+        expiries = []
+        if isinstance(exp_list_resp, dict):
+            expiries = (
+                exp_list_resp.get("data", {}).get("ExpiryDate", [])
+                or exp_list_resp.get("data", {}).get("expiryDate", [])
+                or exp_list_resp.get("ExpiryDate", [])
+            )
+        if not expiries:
+            raise ValueError(f"expiry_list returned no dates: {exp_list_resp}")
+        nearest_expiry = sorted(expiries)[0]  # already in Dhan's accepted format
 
         resp = dhan.option_chain(
-            under_security_id=str(sec_id),
+            under_security_id=sec_id,       # integer, not string
             under_exchange_segment=Dhan.INDEX,
             expiry=nearest_expiry,
         )
-        # underlyingValue lives at different nesting levels in different SDK versions
         uv = None
         if isinstance(resp, dict):
             uv = (
@@ -266,7 +265,7 @@ def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float
         if uv and float(uv) > 0:
             ltp = float(uv)
             _spot_cache[index] = ltp
-            logger.info("Spot price for %s from option_chain.underlyingValue: %.2f", index, ltp)
+            logger.info("Spot price for %s from option_chain: %.2f", index, ltp)
             return ltp
         logger.warning("option_chain returned no underlyingValue for %s: %s", index, resp)
     except Exception as exc:
