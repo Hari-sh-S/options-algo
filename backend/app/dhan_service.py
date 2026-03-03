@@ -232,23 +232,45 @@ def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float
     except Exception as exc:
         logger.warning("ohlc_data failed for %s: %s", index, exc)
 
-    # --- Strategy 2: 1-min intraday chart (last candle close) ---
+    # --- Strategy 2: option_chain (returns underlyingValue = live spot price) ---
     try:
-        today = date.today().strftime("%Y-%m-%d")
-        resp = dhan.intraday_minute_charts(
-            security_id=str(sec_id),
-            exchange_segment=Dhan.INDEX,
-            instrument_type="INDEX",
+        # Find nearest upcoming expiry from master CSV
+        df = _ensure_master()
+        sym_prefix = "NIFTY" if index == IndexName.NIFTY else "SENSEX"
+        seg = EXCHANGE_SEGMENTS[index]
+        mask = (
+            df["SEM_TRADING_SYMBOL"].str.startswith(sym_prefix, na=False)
+            & df["SEM_INSTRUMENT_NAME"].isin(["OPTIDX"])
         )
-        candles = (resp or {}).get("data", {}).get("candles", [])
-        if candles:
-            last_close = float(candles[-1][4])  # [timestamp, o, h, l, close, vol]
-            if last_close > 0:
-                _spot_cache[index] = last_close
-                logger.info("Spot price for %s from intraday chart: %.2f", index, last_close)
-                return last_close
+        filtered = df.loc[mask].copy()
+        filtered["_exp"] = pd.to_datetime(filtered["SEM_EXPIRY_DATE"], errors="coerce").dt.date
+        today = date.today()
+        future_expiries = sorted(filtered[filtered["_exp"] >= today]["_exp"].dropna().unique())
+        if not future_expiries:
+            raise ValueError("No upcoming expiry in master CSV")
+        nearest_expiry = future_expiries[0].strftime("%Y-%m-%d")
+
+        resp = dhan.option_chain(
+            under_security_id=str(sec_id),
+            under_exchange_segment=Dhan.INDEX,
+            expiry=nearest_expiry,
+        )
+        # underlyingValue lives at different nesting levels in different SDK versions
+        uv = None
+        if isinstance(resp, dict):
+            uv = (
+                resp.get("underlyingValue")
+                or resp.get("data", {}).get("underlyingValue")
+                or resp.get("data", {}).get("underlying_value")
+            )
+        if uv and float(uv) > 0:
+            ltp = float(uv)
+            _spot_cache[index] = ltp
+            logger.info("Spot price for %s from option_chain.underlyingValue: %.2f", index, ltp)
+            return ltp
+        logger.warning("option_chain returned no underlyingValue for %s: %s", index, resp)
     except Exception as exc:
-        logger.warning("Intraday chart failed for %s: %s", index, exc)
+        logger.warning("option_chain spot failed for %s: %s", index, exc)
 
     raise ValueError(f"Could not fetch spot price for {index} — all Dhan methods exhausted")
 
