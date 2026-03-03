@@ -169,8 +169,9 @@ from cachetools import TTLCache
 import time as _time
 
 # Global caches to prevent Dhan API 805 Rate Limit Errors
-_spot_cache = TTLCache(maxsize=20, ttl=10)
-_ltp_cache = TTLCache(maxsize=1000, ttl=5)
+# Spot price: 30s TTL. FNO option LTPs: 20s TTL.
+_spot_cache = TTLCache(maxsize=20, ttl=30)
+_ltp_cache = TTLCache(maxsize=1000, ttl=20)
 
 def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float:
     """Fetch the real-time spot price (LTP) for the underlying index."""
