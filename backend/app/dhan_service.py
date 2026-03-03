@@ -261,32 +261,26 @@ def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float
         )
         uv = None
         if isinstance(resp, dict):
-            # Log keys to see structure without noise of 1000+ records
             inner = resp.get("data", {})
-            inner2 = inner.get("data", inner) if isinstance(inner, dict) else {}
-            logger.info("option_chain keys: top=%s, data=%s, data.data=%s",
-                        list(resp.keys()),
-                        list(inner.keys())[:20] if isinstance(inner, dict) else inner,
-                        list(inner2.keys())[:20] if isinstance(inner2, dict) else type(inner2))
-            if isinstance(inner, dict):
-                inner2 = inner.get("data", inner)
-            else:
-                inner2 = {}
+            # data.data is a list/dict of individual option records;
+            # the underlying spot (last_price) is a top-level field in data
+            logger.info("option_chain data-level keys: %s",
+                        list(inner.keys())[:20] if isinstance(inner, dict) else type(inner))
             uv = (
-                resp.get("underlyingValue")
+                inner.get("last_price")         # underlying spot = last_price at data level
                 or inner.get("underlyingValue")
                 or inner.get("underlying_value")
-                or inner2.get("underlyingValue")
-                or inner2.get("underlying_value")
+                or inner.get("lastPrice")
+                or resp.get("underlyingValue")
             )
-            # After market hours, underlyingValue may be 0 — use previous_close_price
+            # After market hours, fall back to previous close
             if not uv or float(uv) == 0:
                 uv = (
                     inner.get("previousClosePrice")
-                    or inner2.get("previousClosePrice")
                     or inner.get("previous_close_price")
+                    or inner.get("prev_close")
                 )
-            logger.info("option_chain resp keys=%s, uv=%s", list(inner.keys())[:10] if isinstance(inner, dict) else "?", uv)
+            logger.info("option_chain uv=%s", uv)
         if uv and float(uv) > 0:
             ltp = float(uv)
             _spot_cache[index] = ltp
