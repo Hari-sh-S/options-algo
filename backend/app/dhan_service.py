@@ -236,19 +236,23 @@ def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float
     try:
         # Get accepted expiry dates directly from Dhan
         exp_list_resp = dhan.expiry_list(
-            under_security_id=sec_id,       # integer
+            under_security_id=sec_id,
             under_exchange_segment=Dhan.INDEX,
         )
         expiries = []
         if isinstance(exp_list_resp, dict):
-            expiries = (
-                exp_list_resp.get("data", {}).get("ExpiryDate", [])
-                or exp_list_resp.get("data", {}).get("expiryDate", [])
-                or exp_list_resp.get("ExpiryDate", [])
-            )
+            data_field = exp_list_resp.get("data", [])
+            if isinstance(data_field, list):
+                expiries = data_field  # data is a flat list of date strings
+            elif isinstance(data_field, dict):
+                expiries = (
+                    data_field.get("ExpiryDate", [])
+                    or data_field.get("expiryDate", [])
+                    or data_field.get("data", [])
+                )
         if not expiries:
-            raise ValueError(f"expiry_list returned no dates: {exp_list_resp}")
-        nearest_expiry = sorted(expiries)[0]  # already in Dhan's accepted format
+            raise ValueError(f"expiry_list returned unexpected format: {exp_list_resp}")
+        nearest_expiry = sorted(expiries)[0]   # already in Dhan's accepted format
 
         resp = dhan.option_chain(
             under_security_id=sec_id,       # integer, not string
