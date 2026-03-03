@@ -173,49 +173,76 @@ import time as _time
 _spot_cache = TTLCache(maxsize=20, ttl=30)
 _ltp_cache = TTLCache(maxsize=1000, ttl=20)
 
+# Yahoo Finance ticker symbols for index spot prices
+_YF_SYMBOLS: dict = {
+    IndexName.NIFTY: "^NSEI",
+    IndexName.SENSEX: "^BSESN",
+}
+
+def _get_spot_from_yahoo(index: IndexName) -> float | None:
+    """Fetch index spot price from Yahoo Finance — free, no auth, no rate limits."""
+    symbol = _YF_SYMBOLS.get(index)
+    if not symbol:
+        return None
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1m&range=1d"
+        with httpx.Client(timeout=5, headers={"User-Agent": "Mozilla/5.0"}) as client:
+            r = client.get(url)
+            r.raise_for_status()
+            j = r.json()
+            meta = j["chart"]["result"][0]["meta"]
+            ltp = float(meta.get("regularMarketPrice") or meta.get("previousClose") or 0)
+            if ltp > 0:
+                return ltp
+    except Exception as exc:
+        logger.warning("Yahoo Finance spot fetch failed for %s: %s", index, exc)
+    return None
+
+
 def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float:
-    """Fetch the real-time spot price (LTP) for the underlying index."""
+    """Fetch the real-time spot price (LTP) for the underlying index.
+
+    Priority:
+      1. In-memory TTL cache (30s)
+      2. Yahoo Finance (free, no rate limits)
+      3. Dhan ticker_data
+      4. Dhan quote_data
+    """
     global _spot_cache
     if index in _spot_cache:
         return _spot_cache[index]
 
-    dhan = _get_dhan(client_id, access_token)
-    sec_id = UNDERLYING_SECURITY_IDS[index]
+    # --- Strategy 1: Yahoo Finance (primary — no rate limits) ---
+    ltp = _get_spot_from_yahoo(index)
+    if ltp is not None and ltp > 0:
+        _spot_cache[index] = ltp
+        logger.info("Spot price for %s from Yahoo Finance: %.2f", index, ltp)
+        return ltp
 
-    # --- Strategy 1: ticker_data (LTP only, lightweight, works for IDX_I) ---
+    # --- Strategy 2: Dhan ticker_data ---
     try:
+        dhan = _get_dhan(client_id, access_token)
+        sec_id = UNDERLYING_SECURITY_IDS[index]
         resp = dhan.ticker_data({Dhan.INDEX: [sec_id]})
         ltp = _extract_ltp_from_quote(resp)
         if ltp is not None and ltp > 0:
             _spot_cache[index] = ltp
             return ltp
     except Exception as exc:
-        logger.warning("ticker_data failed for %s: %s", index, exc)
+        logger.warning("Dhan ticker_data failed for %s: %s", index, exc)
 
-    # --- Strategy 2: quote_data (full packet) ---
+    # --- Strategy 3: Dhan quote_data ---
     try:
+        dhan = _get_dhan(client_id, access_token)
+        sec_id = UNDERLYING_SECURITY_IDS[index]
         resp = dhan.quote_data({Dhan.INDEX: [sec_id]})
-        # Check for rate limit response
-        data = resp.get("data", {}) if isinstance(resp, dict) else {}
-        inner = data.get("data", {}) if isinstance(data, dict) else {}
-        if isinstance(inner, dict):
-            for k, v in inner.items():
-                if k == "805" or (isinstance(v, str) and "Too many requests" in v):
-                    logger.warning("Dhan rate limit hit (805). Returning last cached spot for %s", index)
-                    # Return stale cache value if available (better than crashing)
-                    stale = _spot_cache.get(index)
-                    if stale:
-                        return stale
-                    raise ValueError("Dhan API rate limited (805)")
         ltp = _extract_ltp_from_quote(resp)
         if ltp is not None and ltp > 0:
             _spot_cache[index] = ltp
             return ltp
-        logger.error("quote_data IDX_I empty for %s: %s", index, resp)
-    except ValueError:
-        raise
+        logger.error("All spot price methods failed for %s. Last response: %s", index, resp)
     except Exception as exc:
-        logger.warning("quote_data failed for %s: %s", index, exc)
+        logger.warning("Dhan quote_data failed for %s: %s", index, exc)
 
     raise ValueError(f"Could not fetch spot price for {index} — all methods exhausted")
 
