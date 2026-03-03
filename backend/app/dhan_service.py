@@ -261,6 +261,8 @@ def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float
         )
         uv = None
         if isinstance(resp, dict):
+            # Log truncated response to see key structure
+            logger.info("option_chain raw resp for %s: %s", index, str(resp)[:800])
             # Try top-level and nested data structures
             inner = resp.get("data", {})
             if isinstance(inner, dict):
