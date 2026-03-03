@@ -193,10 +193,24 @@ def _throttled_quote_data(dhan: Dhan, payload: dict) -> dict:
         _last_quote_ts = _time.monotonic()
         return dhan.quote_data(payload)
 
+def _throttled_ohlc_data(dhan: Dhan, payload: dict) -> dict:
+    """Call dhan.ohlc_data with the same 1-per-second global rate limit."""
+    global _last_quote_ts
+    with _quote_lock:
+        now = _time.monotonic()
+        gap = 1.05 - (now - _last_quote_ts)
+        if gap > 0:
+            _time.sleep(gap)
+        _last_quote_ts = _time.monotonic()
+        return dhan.ohlc_data(payload)
+
+
 def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float:
     """Fetch the real-time spot price (LTP) for the underlying index via Dhan.
 
-    Uses the global 1-per-second quote throttle to stay within Dhan's rate limits.
+    For this account, quote_data on IDX_I segment returns empty {}.
+    We use ohlc_data (different Dhan endpoint) which returns a close/ltp value,
+    falling back to 1-min intraday chart if ohlc_data also fails.
     Results are cached for 30 seconds.
     """
     global _spot_cache
@@ -206,16 +220,37 @@ def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float
     dhan = _get_dhan(client_id, access_token)
     sec_id = UNDERLYING_SECURITY_IDS[index]
 
+    # --- Strategy 1: ohlc_data (different endpoint from quote_data, works on IDX_I) ---
     try:
-        resp = _throttled_quote_data(dhan, {Dhan.INDEX: [sec_id]})
+        resp = _throttled_ohlc_data(dhan, {Dhan.INDEX: [sec_id]})
         ltp = _extract_ltp_from_quote(resp)
         if ltp is not None and ltp > 0:
             _spot_cache[index] = ltp
+            logger.info("Spot price for %s from ohlc_data: %.2f", index, ltp)
             return ltp
-        raise ValueError(f"Could not find spot price in response: {resp}")
+        logger.warning("ohlc_data returned no price for %s: %s", index, resp)
     except Exception as exc:
-        logger.exception("Failed to fetch spot price for %s", index)
-        raise
+        logger.warning("ohlc_data failed for %s: %s", index, exc)
+
+    # --- Strategy 2: 1-min intraday chart (last candle close) ---
+    try:
+        today = date.today().strftime("%Y-%m-%d")
+        resp = dhan.intraday_minute_charts(
+            security_id=str(sec_id),
+            exchange_segment=Dhan.INDEX,
+            instrument_type="INDEX",
+        )
+        candles = (resp or {}).get("data", {}).get("candles", [])
+        if candles:
+            last_close = float(candles[-1][4])  # [timestamp, o, h, l, close, vol]
+            if last_close > 0:
+                _spot_cache[index] = last_close
+                logger.info("Spot price for %s from intraday chart: %.2f", index, last_close)
+                return last_close
+    except Exception as exc:
+        logger.warning("Intraday chart failed for %s: %s", index, exc)
+
+    raise ValueError(f"Could not fetch spot price for {index} — all Dhan methods exhausted")
 
 
 # ----------------------------- Option Chain --------------------------------
