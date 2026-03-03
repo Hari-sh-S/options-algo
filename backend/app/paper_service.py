@@ -145,7 +145,7 @@ def place_sell_order(
     position = {
         "securityId": security_id,
         "tradingSymbol": symbol or f"SIM-{security_id}",
-        "optionType": tag.split("-")[0] if "-" in tag else "",
+        "optionType": tag.upper().split("_")[-1] if "_" in tag else (tag.upper().split("-")[-1] if "-" in tag else tag.upper()),
         "strikePrice": 0,
         "netQty": -quantity,  # sold
         "buyQty": 0,

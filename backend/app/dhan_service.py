@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time as _time
 from datetime import date
 from typing import Any, Optional
@@ -173,78 +174,48 @@ import time as _time
 _spot_cache = TTLCache(maxsize=20, ttl=30)
 _ltp_cache = TTLCache(maxsize=1000, ttl=20)
 
-# Yahoo Finance ticker symbols for index spot prices
-_YF_SYMBOLS: dict = {
-    IndexName.NIFTY: "^NSEI",
-    IndexName.SENSEX: "^BSESN",
-}
+# --- Dhan Quote API Rate Limiter ---
+# Dhan limits: Quote API = 1 request/second.
+# This lock + timestamp ensure we never fire more than 1 quote_data call per second,
+# regardless of how many concurrent async workers are running.
+_quote_lock = threading.Lock()
+_last_quote_ts: float = 0.0
 
-def _get_spot_from_yahoo(index: IndexName) -> float | None:
-    """Fetch index spot price from Yahoo Finance — free, no auth, no rate limits."""
-    symbol = _YF_SYMBOLS.get(index)
-    if not symbol:
-        return None
-    try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1m&range=1d"
-        with httpx.Client(timeout=5, headers={"User-Agent": "Mozilla/5.0"}) as client:
-            r = client.get(url)
-            r.raise_for_status()
-            j = r.json()
-            meta = j["chart"]["result"][0]["meta"]
-            ltp = float(meta.get("regularMarketPrice") or meta.get("previousClose") or 0)
-            if ltp > 0:
-                return ltp
-    except Exception as exc:
-        logger.warning("Yahoo Finance spot fetch failed for %s: %s", index, exc)
-    return None
 
+def _throttled_quote_data(dhan: Dhan, payload: dict) -> dict:
+    """Call dhan.quote_data with a 1-per-second global rate limit."""
+    global _last_quote_ts
+    with _quote_lock:
+        now = _time.monotonic()
+        gap = 1.05 - (now - _last_quote_ts)  # 1.05s to stay safely under 1/s
+        if gap > 0:
+            _time.sleep(gap)
+        _last_quote_ts = _time.monotonic()
+        return dhan.quote_data(payload)
 
 def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float:
-    """Fetch the real-time spot price (LTP) for the underlying index.
+    """Fetch the real-time spot price (LTP) for the underlying index via Dhan.
 
-    Priority:
-      1. In-memory TTL cache (30s)
-      2. Yahoo Finance (free, no rate limits)
-      3. Dhan ticker_data
-      4. Dhan quote_data
+    Uses the global 1-per-second quote throttle to stay within Dhan's rate limits.
+    Results are cached for 30 seconds.
     """
     global _spot_cache
     if index in _spot_cache:
         return _spot_cache[index]
 
-    # --- Strategy 1: Yahoo Finance (primary — no rate limits) ---
-    ltp = _get_spot_from_yahoo(index)
-    if ltp is not None and ltp > 0:
-        _spot_cache[index] = ltp
-        logger.info("Spot price for %s from Yahoo Finance: %.2f", index, ltp)
-        return ltp
+    dhan = _get_dhan(client_id, access_token)
+    sec_id = UNDERLYING_SECURITY_IDS[index]
 
-    # --- Strategy 2: Dhan ticker_data ---
     try:
-        dhan = _get_dhan(client_id, access_token)
-        sec_id = UNDERLYING_SECURITY_IDS[index]
-        resp = dhan.ticker_data({Dhan.INDEX: [sec_id]})
+        resp = _throttled_quote_data(dhan, {Dhan.INDEX: [sec_id]})
         ltp = _extract_ltp_from_quote(resp)
         if ltp is not None and ltp > 0:
             _spot_cache[index] = ltp
             return ltp
+        raise ValueError(f"Could not find spot price in response: {resp}")
     except Exception as exc:
-        logger.warning("Dhan ticker_data failed for %s: %s", index, exc)
-
-    # --- Strategy 3: Dhan quote_data ---
-    try:
-        dhan = _get_dhan(client_id, access_token)
-        sec_id = UNDERLYING_SECURITY_IDS[index]
-        resp = dhan.quote_data({Dhan.INDEX: [sec_id]})
-        ltp = _extract_ltp_from_quote(resp)
-        if ltp is not None and ltp > 0:
-            _spot_cache[index] = ltp
-            return ltp
-        logger.error("All spot price methods failed for %s. Last response: %s", index, resp)
-    except Exception as exc:
-        logger.warning("Dhan quote_data failed for %s: %s", index, exc)
-
-    raise ValueError(f"Could not fetch spot price for {index} — all methods exhausted")
+        logger.exception("Failed to fetch spot price for %s", index)
+        raise
 
 
 # ----------------------------- Option Chain --------------------------------
@@ -315,21 +286,14 @@ def get_option_chain(
 
 
 def _fetch_ltp(dhan: Dhan, security_id: int, exchange_segment: str) -> float:
-    """Fetch the LTP for a single security, with retry."""
-    for attempt in range(3):
-        try:
-            resp = dhan.quote_data({exchange_segment: [security_id]})
-            ltp = _extract_ltp_from_quote(resp)
-            if ltp is not None:
-                return ltp
-            return 0.0
-        except Exception:
-            if attempt < 2:
-                _time.sleep(0.5)
-            else:
-                logger.warning("LTP fetch failed for %s after 3 attempts", security_id)
-                return 0.0
-    return 0.0
+    """Fetch the LTP for a single security via the global rate-limited quote call."""
+    try:
+        resp = _throttled_quote_data(dhan, {exchange_segment: [security_id]})
+        ltp = _extract_ltp_from_quote(resp)
+        return ltp if ltp is not None else 0.0
+    except Exception:
+        logger.warning("LTP fetch failed for %s", security_id)
+        return 0.0
 
 
 def fetch_ltps_batch(
@@ -339,15 +303,15 @@ def fetch_ltps_batch(
     exchange_segment: str,
 ) -> dict[int, float]:
     """
-    Fetch LTPs for multiple security IDs in a single API call.
+    Fetch LTPs for multiple security IDs in a single throttled call.
     Returns a dict of {security_id: ltp}.
-    Uses TTL Cache to avoid 805 Rate Limit errors.
+    Cached for 20s; calls to Dhan are serialised to max 1/second.
     """
     global _ltp_cache
     result: dict[int, float] = {}
     missing_sids: list[int] = []
 
-    # Check cache first
+    # Serve from cache first
     for sid in security_ids:
         key = (exchange_segment, sid)
         if key in _ltp_cache:
@@ -361,54 +325,44 @@ def fetch_ltps_batch(
 
     dhan = _get_dhan(client_id, access_token)
 
-    for attempt in range(3):
-        try:
-            resp = dhan.quote_data({exchange_segment: missing_sids})
-            logger.error("DEBUG BATCH QUOTE RESPONSE (missing_sids): %s", resp)
+    try:
+        resp = _throttled_quote_data(dhan, {exchange_segment: missing_sids})
+        logger.debug("Batch quote response for %s: %s", missing_sids, resp)
 
-            # Navigate to the data dict
-            data = resp
-            if isinstance(data, dict):
-                data = data.get("data", data)
-            if isinstance(data, dict):
-                data = data.get("data", data)
+        data = resp
+        if isinstance(data, dict):
+            data = data.get("data", data)
+        if isinstance(data, dict):
+            data = data.get("data", data)
 
-            # Extract LTP for each security ID
-            if isinstance(data, dict):
-                for seg_key, seg_data in data.items():
-                    if isinstance(seg_data, dict):
-                        for sid_str, quote in seg_data.items():
-                            try:
-                                sid = int(sid_str)
-                                if sid in result and isinstance(quote, dict):
-                                    for key in ("last_price", "LTP", "ltp"):
-                                        val = quote.get(key)
-                                        if val is not None and val != 0:
-                                            val_float = float(val)
-                                            result[sid] = val_float
-                                            _ltp_cache[(exchange_segment, sid)] = val_float
-                                            break
-                            except (ValueError, TypeError):
-                                continue
+        if isinstance(data, dict):
+            for seg_key, seg_data in data.items():
+                if isinstance(seg_data, dict):
+                    for sid_str, quote in seg_data.items():
+                        try:
+                            sid = int(sid_str)
+                            if sid in result and isinstance(quote, dict):
+                                # Try all known LTP field names in Dhan API
+                                for key in ("last_price", "LTP", "ltp", "lastPrice", "last_traded_price"):
+                                    val = quote.get(key)
+                                    if val is not None and float(val) != 0:
+                                        val_float = float(val)
+                                        result[sid] = val_float
+                                        _ltp_cache[(exchange_segment, sid)] = val_float
+                                        break
+                        except (ValueError, TypeError):
+                            continue
 
-            # If all missing prices found, return
-            if all(result[sid] > 0 for sid in missing_sids):
-                return result
+        # For any still-missing, try individual calls (each goes through throttler)
+        for sid in missing_sids:
+            if result[sid] == 0.0:
+                val = _fetch_ltp(dhan, sid, exchange_segment)
+                result[sid] = val
+                if val > 0:
+                    _ltp_cache[(exchange_segment, sid)] = val
 
-            # If only partial, try individual calls for missing ones
-            if attempt == 2:
-                for sid in missing_sids:
-                    if result[sid] == 0.0:
-                        val = _fetch_ltp(dhan, sid, exchange_segment)
-                        result[sid] = val
-                        if val > 0:
-                            _ltp_cache[(exchange_segment, sid)] = val
-                return result
-
-        except Exception as exc:
-            logger.warning("Batch LTP fetch attempt %d failed: %s", attempt + 1, exc)
-            if attempt < 2:
-                _time.sleep(0.5)
+    except Exception as exc:
+        logger.warning("Batch LTP fetch failed: %s", exc)
 
     return result
 
