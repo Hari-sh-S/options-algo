@@ -255,23 +255,39 @@ def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float
         nearest_expiry = sorted(expiries)[0]   # already in Dhan's accepted format
 
         resp = dhan.option_chain(
-            under_security_id=sec_id,       # integer, not string
+            under_security_id=sec_id,
             under_exchange_segment=Dhan.INDEX,
             expiry=nearest_expiry,
         )
         uv = None
         if isinstance(resp, dict):
+            # Try top-level and nested data structures
+            inner = resp.get("data", {})
+            if isinstance(inner, dict):
+                inner2 = inner.get("data", inner)
+            else:
+                inner2 = {}
             uv = (
                 resp.get("underlyingValue")
-                or resp.get("data", {}).get("underlyingValue")
-                or resp.get("data", {}).get("underlying_value")
+                or inner.get("underlyingValue")
+                or inner.get("underlying_value")
+                or inner2.get("underlyingValue")
+                or inner2.get("underlying_value")
             )
+            # After market hours, underlyingValue may be 0 — use previous_close_price
+            if not uv or float(uv) == 0:
+                uv = (
+                    inner.get("previousClosePrice")
+                    or inner2.get("previousClosePrice")
+                    or inner.get("previous_close_price")
+                )
+            logger.info("option_chain resp keys=%s, uv=%s", list(inner.keys())[:10] if isinstance(inner, dict) else "?", uv)
         if uv and float(uv) > 0:
             ltp = float(uv)
             _spot_cache[index] = ltp
             logger.info("Spot price for %s from option_chain: %.2f", index, ltp)
             return ltp
-        logger.warning("option_chain returned no underlyingValue for %s: %s", index, resp)
+        logger.warning("option_chain returned no underlyingValue for %s", index)
     except Exception as exc:
         logger.warning("option_chain spot failed for %s: %s", index, exc)
 
