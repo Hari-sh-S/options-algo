@@ -181,20 +181,42 @@ def get_spot_price(client_id: str, access_token: str, index: IndexName) -> float
     dhan = _get_dhan(client_id, access_token)
     sec_id = UNDERLYING_SECURITY_IDS[index]
 
-    # Dhan quote_data expects: { "EXCHANGE_SEGMENT": [security_id, ...] }
-    # For index spot: IDX_I segment
-    exchange_key = Dhan.INDEX  # "IDX_I"
-
+    # --- Strategy 1: ticker_data (LTP only, lightweight, works for IDX_I) ---
     try:
-        resp = dhan.quote_data({exchange_key: [sec_id]})
+        resp = dhan.ticker_data({Dhan.INDEX: [sec_id]})
         ltp = _extract_ltp_from_quote(resp)
-        if ltp is not None:
+        if ltp is not None and ltp > 0:
             _spot_cache[index] = ltp
             return ltp
-        raise ValueError(f"Could not find last_price in response: {resp}")
     except Exception as exc:
-        logger.exception("Failed to fetch spot price for %s", index)
+        logger.warning("ticker_data failed for %s: %s", index, exc)
+
+    # --- Strategy 2: quote_data (full packet) ---
+    try:
+        resp = dhan.quote_data({Dhan.INDEX: [sec_id]})
+        # Check for rate limit response
+        data = resp.get("data", {}) if isinstance(resp, dict) else {}
+        inner = data.get("data", {}) if isinstance(data, dict) else {}
+        if isinstance(inner, dict):
+            for k, v in inner.items():
+                if k == "805" or (isinstance(v, str) and "Too many requests" in v):
+                    logger.warning("Dhan rate limit hit (805). Returning last cached spot for %s", index)
+                    # Return stale cache value if available (better than crashing)
+                    stale = _spot_cache.get(index)
+                    if stale:
+                        return stale
+                    raise ValueError("Dhan API rate limited (805)")
+        ltp = _extract_ltp_from_quote(resp)
+        if ltp is not None and ltp > 0:
+            _spot_cache[index] = ltp
+            return ltp
+        logger.error("quote_data IDX_I empty for %s: %s", index, resp)
+    except ValueError:
         raise
+    except Exception as exc:
+        logger.warning("quote_data failed for %s: %s", index, exc)
+
+    raise ValueError(f"Could not fetch spot price for {index} — all methods exhausted")
 
 
 # ----------------------------- Option Chain --------------------------------
