@@ -6,12 +6,39 @@
     --foreground: #e2e8f0;
   }
 
+  html {
+    /* Native momentum scrolling on iOS */
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+
   body {
     background: var(--background);
     color: var(--foreground);
     font-family: "Inter", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* Prevent iOS text size inflation on orientation change */
+    -webkit-text-size-adjust: 100%;
+    /* Stop pull-to-refresh bounce from triggering API calls */
+    overscroll-behavior-y: none;
+  }
+
+  /* Remove iOS blue tap flash on all elements */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Eliminate 300ms tap delay + add press feedback on all interactive elements */
+  button, a, [role="button"] {
+    touch-action: manipulation;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    cursor: pointer;
+  }
+
+  button:active, a:active, [role="button"]:active {
+    opacity: 0.75;
+    transform: scale(0.96);
   }
 
   /* Custom scrollbar */
@@ -29,7 +56,6 @@
     background: rgba(139, 92, 246, 0.5);
   }
 
-  /* Selection */
   ::selection {
     background: rgba(139, 92, 246, 0.3);
     color: white;
@@ -37,11 +63,47 @@
 }
 
 @layer utilities {
-  /* Glassmorphism card utility */
+  /* Glassmorphism card — GPU composited to prevent iOS scroll repaint */
   .glass-card {
     background: rgba(255, 255, 255, 0.03);
     backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
+    transform: translateZ(0);   /* GPU layer */
+    will-change: transform;
+  }
+
+  /* Tabular numbers so PnL digits don't cause layout shifts */
+  .pnl-value {
+    font-variant-numeric: tabular-nums;
+    transition: color 0.3s ease;
+  }
+
+  /* Smooth entry animation for cards after data loads */
+  .fade-in {
+    animation: fadeIn 0.25s ease forwards;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Skeleton shimmer for loading states */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      rgba(255,255,255,0.04) 25%,
+      rgba(255,255,255,0.09) 50%,
+      rgba(255,255,255,0.04) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease infinite;
+    border-radius: 6px;
+  }
+
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
   }
 }

@@ -6,14 +6,14 @@ import { AuthProvider } from "@/contexts/AuthContext";
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
+  display: "swap",
 });
 
 export const viewport: Viewport = {
   themeColor: "#0a0a14",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // Do NOT set maximumScale/userScalable — causes iOS zoom glitch on inputs
 };
 
 export const metadata: Metadata = {
@@ -26,9 +26,10 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "OptionI",
   },
+  formatDetection: { telephone: false },
   icons: {
-    icon: "/icon.svg",
-    apple: "/icon.svg",
+    icon: "/icon-192.png",
+    apple: "/icon-180.png", // PNG required — iOS ignores SVG for homescreen
   },
 };
 
@@ -39,6 +40,22 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
+      <head>
+        {/* Service worker — enables cache-first loading & instant iOS tab resume */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function() {
+                  navigator.serviceWorker.register('/sw.js').catch(function(e) {
+                    console.warn('SW failed:', e);
+                  });
+                });
+              }
+            `,
+          }}
+        />
+      </head>
       <body className={`${inter.variable} font-sans antialiased`}>
         <AuthProvider>
           {children}
