@@ -1,79 +1,48 @@
-// OptionI Service Worker v2
-// Strategy: Cache-first for static assets, network-first for API calls
+// OptionI Service Worker v3
+// Cache-first for static assets ONLY. Let Firebase Hosting serve all HTML navigation.
 
-const CACHE_NAME = 'optioni-v2';
+const CACHE_NAME = 'optioni-v3';
+
 const STATIC_PATTERNS = [
   /\/_next\/static\//,
-  /\.(?:js|css|woff2?|png|svg|ico)$/,
-];
-const API_PATTERNS = [
-  /\/api\//,
-  /firestore\.googleapis\.com/,
-  /identitytoolkit\.googleapis\.com/,
+  /\.(?:woff2?|png|ico)$/,
 ];
 
-// On install: cache core app shell
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) =>
-      cache.addAll(['/', '/manifest.json'])
-    )
-  );
-  // Take control immediately — don't wait for old SW to die
+// On install: pre-cache nothing (avoid race with Firebase rewrite)
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
-// On activate: delete old caches & claim all clients
+// On activate: delete old caches, claim all clients immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
-        keys
-          .filter((k) => k !== CACHE_NAME)
-          .map((k) => caches.delete(k))
+        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
       )
-    )
+    ).then(() => self.clients.claim())
   );
-  // Claim all open tabs immediately (critical for iOS tab resume)
-  self.clients.claim();
 });
 
-// Fetch strategy
+// Fetch: only cache static assets; pass everything else straight through
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET and cross-origin API calls
+  // Only handle GET requests for same-origin static files
   if (request.method !== 'GET') return;
-  if (API_PATTERNS.some((p) => p.test(url.href))) return;
+  if (url.origin !== self.location.origin) return;
 
-  if (STATIC_PATTERNS.some((p) => p.test(url.pathname) || p.test(url.href))) {
-    // Cache-first: serve from cache, update in background
-    event.respondWith(
-      caches.open(CACHE_NAME).then(async (cache) => {
-        const cached = await cache.match(request);
-        const networkPromise = fetch(request).then((res) => {
-          if (res.ok) cache.put(request, res.clone());
-          return res;
-        }).catch(() => null);
-        return cached || networkPromise;
-      })
-    );
-    return;
-  }
+  // Only cache Next.js static assets and fonts/images
+  if (!STATIC_PATTERNS.some((p) => p.test(url.pathname))) return;
 
-  // Network-first for HTML navigation (ensures fresh page on hard refresh)
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request).catch(() =>
-        caches.match(request).then((cached) => cached || caches.match('/'))
-      )
-    );
-    return;
-  }
-
-  // Default: network with cache fallback
   event.respondWith(
-    fetch(request).catch(() => caches.match(request))
+    caches.open(CACHE_NAME).then(async (cache) => {
+      const cached = await cache.match(request);
+      if (cached) return cached;
+      const response = await fetch(request);
+      if (response.ok) cache.put(request, response.clone());
+      return response;
+    })
   );
 });
