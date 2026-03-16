@@ -3,7 +3,8 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import {
     onAuthStateChanged,
-    signInWithPopup,
+    signInWithRedirect,
+    getRedirectResult,
     signOut as firebaseSignOut,
     type User,
 } from "firebase/auth";
@@ -30,6 +31,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [idToken, setIdToken] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
 
+    // On mount: pick up any redirect result from Google sign-in
+    useEffect(() => {
+        getRedirectResult(getFirebaseAuth()).catch(() => {
+            // Ignore errors (e.g. no redirect happened)
+        });
+    }, []);
+
     // Listen for auth state changes
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(getFirebaseAuth(), async (firebaseUser) => {
@@ -55,8 +63,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return () => clearInterval(interval);
     }, [user]);
 
+    // Use redirect-based sign-in — works on all browsers/domains,
+    // avoids cross-origin popup issues (COOP) on Cloudflare Pages
     const signInWithGoogle = useCallback(async () => {
-        await signInWithPopup(getFirebaseAuth(), googleProvider);
+        await signInWithRedirect(getFirebaseAuth(), googleProvider);
     }, []);
 
     const signOut = useCallback(async () => {
