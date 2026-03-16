@@ -41,6 +41,11 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <head>
+        <link rel="preconnect" href="https://optioni-api.duckdns.org" />
+        <link rel="dns-prefetch" href="https://optioni-api.duckdns.org" />
+        <link rel="preconnect" href="https://apis.google.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        
         {/* Service worker — enables cache-first loading & instant iOS tab resume */}
         <script
           dangerouslySetInnerHTML={{

@@ -7,14 +7,16 @@ import CredentialsPanel from "@/components/CredentialsPanel";
 import StrategyConfig from "@/components/StrategyConfig";
 import InfoCards from "@/components/InfoCards";
 import MarginCard from "@/components/MarginCard";
-import OrderHistory from "@/components/EntrySummary";
-import LivePositions from "@/components/LivePositions";
-import PnlDashboard from "@/components/PnlDashboard";
 import HelpTab from "@/components/HelpTab";
 import ProfileTab from "@/components/ProfileTab";
-import ScheduledJobs from "@/components/ScheduledJobs";
 import { usePositions } from "@/hooks/useMarketData";
 import { useAuth } from "@/contexts/AuthContext";
+import dynamic from "next/dynamic";
+
+const OrderHistory = dynamic(() => import("@/components/EntrySummary"), { ssr: false });
+const LivePositions = dynamic(() => import("@/components/LivePositions"), { ssr: false });
+const PnlDashboard = dynamic(() => import("@/components/PnlDashboard"), { ssr: false });
+const ScheduledJobs = dynamic(() => import("@/components/ScheduledJobs"), { ssr: false });
 
 import type { ExecuteResponse } from "@/lib/api";
 
