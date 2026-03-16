@@ -33,8 +33,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // On mount: pick up any redirect result from Google sign-in
     useEffect(() => {
-        getRedirectResult(getFirebaseAuth()).catch(() => {
-            // Ignore errors (e.g. no redirect happened)
+        getRedirectResult(getFirebaseAuth()).catch((err) => {
+            console.error("[Auth] getRedirectResult error:", err);
         });
     }, []);
 
@@ -66,7 +66,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Use redirect-based sign-in — works on all browsers/domains,
     // avoids cross-origin popup issues (COOP) on Cloudflare Pages
     const signInWithGoogle = useCallback(async () => {
-        await signInWithRedirect(getFirebaseAuth(), googleProvider);
+        try {
+            console.log("[Auth] Starting Google sign-in redirect...");
+            await signInWithRedirect(getFirebaseAuth(), googleProvider);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[Auth] signInWithRedirect error:", err);
+            window.alert("Sign-in error: " + msg);
+        }
     }, []);
 
     const signOut = useCallback(async () => {
