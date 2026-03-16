@@ -58,6 +58,7 @@ _default_origins = [
     "http://127.0.0.1:3000",
     "https://optioni.web.app",
     "https://optioni.firebaseapp.com",
+    "https://options-algo.pages.dev",
 ]
 _env_origins = os.environ.get("CORS_ORIGINS", "")
 _origins = [o.strip() for o in _env_origins.split(",") if o.strip()] if _env_origins else _default_origins
