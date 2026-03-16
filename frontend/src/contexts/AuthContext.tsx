@@ -3,8 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import {
     onAuthStateChanged,
-    signInWithRedirect,
-    getRedirectResult,
+    signInWithPopup,
     signOut as firebaseSignOut,
     type User,
 } from "firebase/auth";
@@ -31,13 +30,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [idToken, setIdToken] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // On mount: pick up any redirect result from Google sign-in
-    useEffect(() => {
-        getRedirectResult(getFirebaseAuth()).catch((err) => {
-            console.error("[Auth] getRedirectResult error:", err);
-        });
-    }, []);
-
     // Listen for auth state changes
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(getFirebaseAuth(), async (firebaseUser) => {
@@ -63,15 +55,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return () => clearInterval(interval);
     }, [user]);
 
-    // Use redirect-based sign-in — works on all browsers/domains,
-    // avoids cross-origin popup issues (COOP) on Cloudflare Pages
     const signInWithGoogle = useCallback(async () => {
         try {
-            console.log("[Auth] Starting Google sign-in redirect...");
-            await signInWithRedirect(getFirebaseAuth(), googleProvider);
+            await signInWithPopup(getFirebaseAuth(), googleProvider);
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            console.error("[Auth] signInWithRedirect error:", err);
+            console.error("[Auth] signInWithPopup error:", err);
             window.alert("Sign-in error: " + msg);
         }
     }, []);
