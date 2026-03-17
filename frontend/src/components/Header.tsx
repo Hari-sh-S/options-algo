@@ -59,6 +59,23 @@ interface HeaderProps {
     onTabChange: (tab: TabName) => void;
 }
 
+declare const __COMMIT_DATE__: string;
+
+const buildDateString = (() => {
+    try {
+        return new Date(__COMMIT_DATE__).toLocaleString("en-IN", {
+            timeZone: "Asia/Kolkata",
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+        });
+    } catch {
+        return "Unknown";
+    }
+})();
+
 export default function Header({ idToken, activeTab, onTabChange }: HeaderProps) {
     const status = useMarketStatus();
     const clock = useClock();
@@ -87,15 +104,20 @@ export default function Header({ idToken, activeTab, onTabChange }: HeaderProps)
                 </div>
 
                 {/* Clock & Status */}
-                <div className="flex items-center gap-4">
-                    <span className="font-mono text-sm text-slate-300">{clock || "--:--:--"}</span>
-                    <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold tracking-wide ${status?.is_open
-                            ? "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30"
-                            : "bg-red-500/20 text-red-400 ring-1 ring-red-500/30"
-                            }`}
-                    >
-                        {status?.status_label || "CONNECTING..."}
+                <div className="flex flex-col items-end">
+                    <div className="flex items-center gap-4">
+                        <span className="font-mono text-sm text-slate-300">{clock || "--:--:--"}</span>
+                        <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold tracking-wide ${status?.is_open
+                                ? "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30"
+                                : "bg-red-500/20 text-red-400 ring-1 ring-red-500/30"
+                                }`}
+                        >
+                            {status?.status_label || "CONNECTING..."}
+                        </span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider">
+                        Updated: {buildDateString}
                     </span>
                 </div>
             </div>
