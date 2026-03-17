@@ -79,33 +79,27 @@ export function useMarketStatus() {
 export function useSpotPrices(idToken: string | null) {
     const [nifty, setNifty] = useState<SpotPrice | null>(null);
     const [sensex, setSensex] = useState<SpotPrice | null>(null);
-    const tokenRef = useRef(idToken);
-    tokenRef.current = idToken;
-
-    const [token, setToken] = useState(idToken);
-    useEffect(() => { setToken(idToken); }, [idToken]);
 
     const poll = useCallback(async () => {
-        if (!tokenRef.current) return;
+        if (!idToken) return;
         try {
-            const res = await fetchSpot("NIFTY", tokenRef.current);
+            const res = await fetchSpot("NIFTY", idToken);
             setNifty(res);
         } catch { /* ignore */ }
 
         // 2s gap so NIFTY and SENSEX calls don't burst together
         await new Promise((r) => setTimeout(r, 2000));
-        if (!tokenRef.current) return;
+        if (!idToken) return;
 
         try {
-            const res = await fetchSpot("SENSEX", tokenRef.current);
+            const res = await fetchSpot("SENSEX", idToken);
             setSensex(res);
         } catch { /* ignore */ }
-    }, []);
+    }, [idToken]);
 
     useEffect(() => {
-        if (!token) return;
         poll();
-    }, [token, poll]);
+    }, [poll]);
 
     useVisibilityInterval(poll, 15000);
 
